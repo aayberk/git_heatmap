@@ -1,0 +1,17 @@
+# Gradle
+.gradle/
+build/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+out/
+
+# OS files
+.DS_Store
+
+# Logs
+*.log
+
+gradle/wrapper/gradle-wrapper.jar
+.intellijPlatform/

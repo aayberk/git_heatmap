@@ -1,0 +1,12 @@
+<idea-plugin>
+    <id>com.githeatmap</id>
+    <name>Git Heatmap</name>
+    <vendor>Git Heatmap</vendor>
+    <description>Git repository analytics and visualization</description>
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Git Heatmap" secondary="true" icon="AllIcons.Actions.Search" anchor="bottom"
+                    factoryClass="com.githeatmap.ui.HeatmapToolWindowFactory"/>
+    </extensions>
+</idea-plugin>
