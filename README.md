@@ -19,15 +19,28 @@ Git Heatmap is an IntelliJ IDEA plugin prototype that analyzes Git history and v
 
 - `JDK 21`
 - `Git`
-- `IntelliJ IDEA 2026.1+`
+- `IntelliJ IDEA 2024.2+`
 - A Gradle-capable environment on macOS, Linux, or Windows
 
 ## Build Target
 
-- IntelliJ Platform: `2026.1`
-- Since build: `261`
+- Build target: `2024.2`
+- Since build: `242`
+- Compatibility goal: `2024.2+`
 - Plugin ID: `com.githeatmap`
 - Tool window: `Git Heatmap`
+
+## Verified IDE Matrix
+
+Plugin verification is configured for:
+
+- `IntelliJ IDEA Community 2024.2`
+- `IntelliJ IDEA 2024.2`
+- `IntelliJ IDEA Community 2024.3`
+- `IntelliJ IDEA 2024.3`
+- `IntelliJ IDEA Community 2025.1`
+- `IntelliJ IDEA 2025.1`
+- `IntelliJ IDEA 2026.1`
 
 ## Setup
 

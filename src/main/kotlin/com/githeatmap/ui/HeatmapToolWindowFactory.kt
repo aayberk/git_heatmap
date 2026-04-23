@@ -23,7 +23,6 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
-import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.JBColor
 import com.intellij.ui.ComboboxSpeedSearch
 import com.intellij.ui.content.ContentFactory
@@ -51,8 +50,8 @@ import javax.swing.JSpinner
 import javax.swing.JTabbedPane
 import javax.swing.SpinnerDateModel
 
-class HeatmapToolWindowFactory : ToolWindowFactory {
-    override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
+class HeatmapToolWindowContentBuilder {
+    fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val heatmapPanel = HeatmapPanel()
         val filesPanel = FileListPanel(project)
         val commitFilterLabel = JLabel("All commits")
@@ -69,7 +68,7 @@ class HeatmapToolWindowFactory : ToolWindowFactory {
             isEnabled = false
             prototypeDisplayValue = "origin/very-long-feature-branch"
             selectedItem = null
-            ComboboxSpeedSearch(this)
+            ComboboxSpeedSearch.installOn(this)
         }
         val progressBar = JProgressBar().apply {
             isIndeterminate = true
@@ -1156,7 +1155,7 @@ class HeatmapToolWindowFactory : ToolWindowFactory {
             isEditable = false
             selectedItem = defaultSelection
             prototypeDisplayValue = branches.maxByOrNull { it.length } ?: "origin/main"
-            ComboboxSpeedSearch(this)
+            ComboboxSpeedSearch.installOn(this)
         }
     }
 

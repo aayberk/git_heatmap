@@ -1,3 +1,5 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
+
 plugins {
     kotlin("jvm") version "2.3.20"
     id("org.jetbrains.intellij.platform") version "2.14.0"
@@ -5,7 +7,7 @@ plugins {
 }
 
 group = "com.githeatmap"
-version = "1.0.0"
+version = "1.0.1"
 
 repositories {
     mavenCentral()
@@ -17,6 +19,7 @@ repositories {
 dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.1")
 
     intellijPlatform {
         intellijIdea("2026.1")
@@ -27,6 +30,9 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    doFirst {
+        layout.buildDirectory.dir("tmp/test").get().asFile.mkdirs()
+    }
 }
 
 kotlin {
@@ -36,8 +42,20 @@ kotlin {
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "261"
+            sinceBuild = "242"
             untilBuild = provider { null }
+        }
+    }
+
+    pluginVerification {
+        ides {
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2024.2")
+            create(IntelliJPlatformType.IntellijIdea, "2024.2")
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2024.3")
+            create(IntelliJPlatformType.IntellijIdea, "2024.3")
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2025.1")
+            create(IntelliJPlatformType.IntellijIdea, "2025.1")
+            create(IntelliJPlatformType.IntellijIdea, "2026.1")
         }
     }
 }

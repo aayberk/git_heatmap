@@ -1,7 +1,7 @@
 package com.githeatmap.ui
 
 import com.githeatmap.engine.ScoredFile
-import com.intellij.util.ui.UIUtil
+import com.intellij.ide.ui.LafManager
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Dimension
@@ -12,6 +12,7 @@ import java.awt.RenderingHints
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import javax.swing.JPanel
+import javax.swing.UIManager
 
 class HeatmapPanel : JPanel() {
 
@@ -216,7 +217,7 @@ class HeatmapPanel : JPanel() {
     }
 
     private fun currentPalette(): HeatmapPalette {
-        return if (UIUtil.isUnderDarcula()) {
+        return if (isDarkTheme()) {
             HeatmapPalette(
                 background = Color(43, 43, 43),
                 title = Color(223, 223, 223),
@@ -253,6 +254,12 @@ class HeatmapPanel : JPanel() {
                 )
             )
         }
+    }
+
+    private fun isDarkTheme(): Boolean {
+        val lafManager = LafManager.getInstance()
+        return lafManager.currentUIThemeLookAndFeel?.isDark == true ||
+            UIManager.getLookAndFeel()?.name?.contains("dark", ignoreCase = true) == true
     }
 
     private fun interpolateColor(start: Color, end: Color, ratio: Double): Color {

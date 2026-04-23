@@ -19,7 +19,7 @@ class HeatmapPanelTest {
             )
         }
 
-        val file = panel.getFileAt(12, 12)
+        val file = panel.getFileAt(20, 60)
 
         assertEquals("src/App.kt", file?.metrics?.path)
     }

@@ -10,7 +10,7 @@ class GitRootDiscovery(private val project: Project) {
         val projectBasePath = project.basePath ?: return emptyList()
         val projectBaseDir = File(projectBasePath)
 
-        val vcsRoots = ProjectLevelVcsManager.getInstance(project).allVcsRoots
+        val vcsRoots = ProjectLevelVcsManager.getInstance(project).getAllVcsRoots()
             .map { root -> root.path.path }
 
         val discoveredPaths = (vcsRoots + fallbackScan(projectBaseDir))
