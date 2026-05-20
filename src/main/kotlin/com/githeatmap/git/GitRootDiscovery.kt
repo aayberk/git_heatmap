@@ -1,8 +1,9 @@
 package com.githeatmap.git
 
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vcs.ProjectLevelVcsManager
 import java.io.File
+
+private const val FALLBACK_SCAN_DEPTH = 4
 
 class GitRootDiscovery(private val project: Project) {
 
@@ -10,8 +11,7 @@ class GitRootDiscovery(private val project: Project) {
         val projectBasePath = project.basePath ?: return emptyList()
         val projectBaseDir = File(projectBasePath)
 
-        val vcsRoots = ProjectLevelVcsManager.getInstance(project).getAllVcsRoots()
-            .map { root -> root.path.path }
+        val vcsRoots = VcsRootPaths.getAll(project)
 
         val discoveredPaths = (vcsRoots + fallbackScan(projectBaseDir))
             .distinct()
@@ -49,9 +49,5 @@ class GitRootDiscovery(private val project: Project) {
             get() = if (relativePath == ".") name else "$name ($relativePath)"
 
         override fun toString(): String = displayName
-    }
-
-    private companion object {
-        private const val FALLBACK_SCAN_DEPTH = 4
     }
 }

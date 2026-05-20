@@ -6,6 +6,7 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>Git4Idea</depends>
     <extensions defaultExtensionNs="com.intellij">
-        <postStartupActivity implementation="com.githeatmap.ui.GitHeatmapToolWindowStartupActivity"/>
+        <toolWindow id="Git Heatmap" secondary="true" icon="AllIcons.Actions.Search" anchor="bottom"
+                    factoryClass="com.githeatmap.ui.HeatmapToolWindowFactory"/>
     </extensions>
 </idea-plugin>
