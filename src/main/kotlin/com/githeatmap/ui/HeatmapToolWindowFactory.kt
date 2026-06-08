@@ -55,6 +55,7 @@ class HeatmapToolWindowContentBuilder {
         val heatmapPanel = HeatmapPanel()
         val filesPanel = FileListPanel(project)
         lateinit var codeStatisticsPanel: CodeStatisticsPanel
+        lateinit var tokenUsagePanel: TokenUsagePanel
         val commitFilterLabel = JLabel("All commits")
         lateinit var clearCommitFilterButton: JButton
         lateinit var tabs: JTabbedPane
@@ -1031,6 +1032,7 @@ class HeatmapToolWindowContentBuilder {
         heatmapPanel.addMouseMotionListener(interactionListener)
 
         codeStatisticsPanel = CodeStatisticsPanel()
+        tokenUsagePanel = TokenUsagePanel(project)
 
         tabs = JTabbedPane().apply {
             addTab("Heatmap", JScrollPane(heatmapPanel))
@@ -1038,6 +1040,7 @@ class HeatmapToolWindowContentBuilder {
             addTab("Commits", JScrollPane(commitsPanel))
             addTab("Authors", JScrollPane(authorPanel))
             addTab("Code Statistics", codeStatisticsPanel)
+            addTab("Token Usage", tokenUsagePanel)
             selectedIndex = 3
         }
         val mainPanel = Box.createVerticalBox().apply {
