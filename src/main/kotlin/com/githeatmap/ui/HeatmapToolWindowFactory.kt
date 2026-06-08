@@ -54,6 +54,7 @@ class HeatmapToolWindowContentBuilder {
     fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val heatmapPanel = HeatmapPanel()
         val filesPanel = FileListPanel(project)
+        lateinit var codeStatisticsPanel: CodeStatisticsPanel
         val commitFilterLabel = JLabel("All commits")
         lateinit var clearCommitFilterButton: JButton
         lateinit var tabs: JTabbedPane
@@ -197,7 +198,9 @@ class HeatmapToolWindowContentBuilder {
         fun buildAnalysisResult(
             commits: List<CommitEvent>,
             scoredFiles: List<com.githeatmap.engine.ScoredFile>? = null,
-            commitEfforts: List<CommitEffortMetrics> = commits.map { effortHeuristicEngine.estimateCommit(it) }
+            commitEfforts: List<CommitEffortMetrics> = commits.map { effortHeuristicEngine.estimateCommit(it) },
+            statisticsCommits: List<CommitEvent> = commits,
+            statisticsCommitEfforts: List<CommitEffortMetrics> = statisticsCommits.map { effortHeuristicEngine.estimateCommit(it) }
         ): AnalysisResult {
             val authorFileBreakdown = authorStatsCalculator.calculateFileBreakdown(commits)
             val effortByAuthor = effortAggregator.summarizeAuthorEffort(commitEfforts)
@@ -218,6 +221,8 @@ class HeatmapToolWindowContentBuilder {
                 commitScoredFiles = commitScoredFiles,
                 filteredCommits = commits,
                 commitEfforts = commitEfforts,
+                statisticsCommits = statisticsCommits,
+                statisticsCommitEfforts = statisticsCommitEfforts,
                 totalEffort = effortAggregator.summarizeTotalEffort(commitEfforts),
                 commitCount = commits.size,
                 totalAdded = commits.sumOf { commit -> commit.files.sumOf { it.addedLines } },
@@ -232,14 +237,25 @@ class HeatmapToolWindowContentBuilder {
             val scopedEfforts = result.commitEfforts.filter { effort ->
                 "${effort.repoId}::${effort.commitHash}" in overlayScopedCommitIds
             }
+            val scopedStatisticsCommits = result.statisticsCommits.filter { commitIdentity(it) in overlayScopedCommitIds }
+            val scopedStatisticsEfforts = result.statisticsCommitEfforts.filter { effort ->
+                "${effort.repoId}::${effort.commitHash}" in overlayScopedCommitIds
+            }
 
             if (scopedCommits.size == result.filteredCommits.size &&
-                scopedEfforts.size == result.commitEfforts.size
+                scopedEfforts.size == result.commitEfforts.size &&
+                scopedStatisticsCommits.size == result.statisticsCommits.size &&
+                scopedStatisticsEfforts.size == result.statisticsCommitEfforts.size
             ) {
                 return result
             }
 
-            return buildAnalysisResult(scopedCommits, commitEfforts = scopedEfforts)
+            return buildAnalysisResult(
+                scopedCommits,
+                commitEfforts = scopedEfforts,
+                statisticsCommits = scopedStatisticsCommits,
+                statisticsCommitEfforts = scopedStatisticsEfforts
+            )
         }
 
         val commitsPanel = CommitListPanel { commit ->
@@ -250,6 +266,7 @@ class HeatmapToolWindowContentBuilder {
             filesPanel.setCommitFilter(commit)
             heatmapPanel.files = result.commitScoredFiles[commitIdentity(commit)].orEmpty()
             heatmapPanel.overlayPaths = overlayPaths
+            codeStatisticsPanel.setContributionData(result.statisticsCommits, result.statisticsCommitEfforts)
             commitFilterLabel.text = "Commit: ${commit.hash.take(8)}"
             authorFilterLabel.text = "All authors"
             clearCommitFilterButton.isEnabled = true
@@ -270,11 +287,14 @@ class HeatmapToolWindowContentBuilder {
             val result = currentAnalysisResult?.let(::scopedAnalysisResult)
             val authorCommits = result?.filteredCommits?.filter { it.author == author }.orEmpty()
             val authorCommitEfforts = result?.commitEfforts?.filter { it.author == author }.orEmpty()
+            val statisticsAuthorCommits = result?.statisticsCommits?.filter { it.author == author }.orEmpty()
+            val statisticsAuthorEfforts = result?.statisticsCommitEfforts?.filter { it.author == author }.orEmpty()
             filesPanel.clearCommitFilter()
             commitsPanel.setData(authorCommits, authorCommitEfforts)
             filesPanel.setAuthorFilter(author, details)
             heatmapPanel.files = result?.authorScoredFiles?.get(author).orEmpty()
             heatmapPanel.overlayPaths = overlayPaths
+            codeStatisticsPanel.setContributionData(statisticsAuthorCommits, statisticsAuthorEfforts)
             authorFilterLabel.text = "Author: $author"
             commitFilterLabel.text = "All commits"
             clearAuthorFilterButton.isEnabled = true
@@ -336,6 +356,7 @@ class HeatmapToolWindowContentBuilder {
             heatmapPanel.overlayPaths = emptySet()
             authorPanel.setData(emptyList(), emptyMap())
             commitsPanel.setData(emptyList(), emptyList())
+            codeStatisticsPanel.onScopeChanged()
             commitFilterLabel.text = "All commits"
             authorFilterLabel.text = "All authors"
             overlayLabel.text = "No PR overlay"
@@ -550,12 +571,14 @@ class HeatmapToolWindowContentBuilder {
                 commitsPanel.setData(visibleResult.filteredCommits, visibleResult.commitEfforts)
                 val commit = visibleResult.filteredCommits.firstOrNull { commitIdentity(it) == activeCommit }
                 if (commit != null) {
+                    codeStatisticsPanel.setContributionData(visibleResult.statisticsCommits, visibleResult.statisticsCommitEfforts)
                     filesPanel.setCommitFilter(commit)
                     heatmapPanel.files = visibleResult.commitScoredFiles[activeCommit].orEmpty()
                     commitFilterLabel.text = "Commit: ${commit.hash.take(8)}"
                     clearCommitFilterButton.isEnabled = true
                 } else {
                     activeCommitFilterId = null
+                    codeStatisticsPanel.setContributionData(visibleResult.statisticsCommits, visibleResult.statisticsCommitEfforts)
                     filesPanel.clearCommitFilter()
                     heatmapPanel.files = result.scoredFiles
                     commitFilterLabel.text = "All commits"
@@ -566,16 +589,20 @@ class HeatmapToolWindowContentBuilder {
             } else if (activeAuthor != null) {
                 val authorCommits = visibleResult.filteredCommits.filter { it.author == activeAuthor }
                 val authorCommitEfforts = visibleResult.commitEfforts.filter { it.author == activeAuthor }
+                val statisticsAuthorCommits = visibleResult.statisticsCommits.filter { it.author == activeAuthor }
+                val statisticsAuthorEfforts = visibleResult.statisticsCommitEfforts.filter { it.author == activeAuthor }
                 commitsPanel.setShowRepositoryColumn(isAggregateSelection())
                 commitsPanel.setData(authorCommits, authorCommitEfforts)
                 val details = visibleResult.authorFileBreakdown[activeAuthor]
                 if (details != null) {
+                    codeStatisticsPanel.setContributionData(statisticsAuthorCommits, statisticsAuthorEfforts)
                     filesPanel.setAuthorFilter(activeAuthor, details)
                     heatmapPanel.files = visibleResult.authorScoredFiles[activeAuthor].orEmpty()
                     authorFilterLabel.text = "Author: $activeAuthor"
                     clearAuthorFilterButton.isEnabled = true
                 } else {
                     activeAuthorFilter = null
+                    codeStatisticsPanel.setContributionData(visibleResult.statisticsCommits, visibleResult.statisticsCommitEfforts)
                     filesPanel.clearAuthorFilter()
                     heatmapPanel.files = result.scoredFiles
                     authorFilterLabel.text = "All authors"
@@ -586,6 +613,7 @@ class HeatmapToolWindowContentBuilder {
             } else {
                 commitsPanel.setShowRepositoryColumn(isAggregateSelection())
                 commitsPanel.setData(visibleResult.filteredCommits, visibleResult.commitEfforts)
+                codeStatisticsPanel.setContributionData(visibleResult.statisticsCommits, visibleResult.statisticsCommitEfforts)
                 filesPanel.clearCommitFilter()
                 filesPanel.clearAuthorFilter()
                 heatmapPanel.files = result.scoredFiles
@@ -628,7 +656,14 @@ class HeatmapToolWindowContentBuilder {
                 heatScoreCalculator.calculate(metricEngine.aggregate(filtered))
             }
             val commitEfforts = filtered.map { effortHeuristicEngine.estimateCommit(it) }
-            return buildAnalysisResult(filtered, scoredFiles, commitEfforts)
+            val statisticsCommitEfforts = cachedCommits.map { effortHeuristicEngine.estimateCommit(it) }
+            return buildAnalysisResult(
+                filtered,
+                scoredFiles,
+                commitEfforts,
+                statisticsCommits = cachedCommits,
+                statisticsCommitEfforts = statisticsCommitEfforts
+            )
         }
 
         fun refresh() {
@@ -885,6 +920,7 @@ class HeatmapToolWindowContentBuilder {
             currentRepositoryRoot = selectedRoot
             resetAnalysisState()
             loadBranchesFor(selectedRoot)
+            codeStatisticsPanel.onScopeChanged()
             prButton.toolTipText = if (selectedRoot.id == AGGREGATE_SCOPE_ID) {
                 "PR overlay is only available in single-repository mode"
             } else {
@@ -994,14 +1030,16 @@ class HeatmapToolWindowContentBuilder {
         heatmapPanel.addMouseListener(interactionListener)
         heatmapPanel.addMouseMotionListener(interactionListener)
 
+        codeStatisticsPanel = CodeStatisticsPanel()
+
         tabs = JTabbedPane().apply {
             addTab("Heatmap", JScrollPane(heatmapPanel))
             addTab("Files", JScrollPane(filesPanel))
             addTab("Commits", JScrollPane(commitsPanel))
             addTab("Authors", JScrollPane(authorPanel))
+            addTab("Code Statistics", codeStatisticsPanel)
             selectedIndex = 3
         }
-
         val mainPanel = Box.createVerticalBox().apply {
             add(toolbar)
             add(tabs)
@@ -1024,6 +1062,7 @@ class HeatmapToolWindowContentBuilder {
                 updateRepositorySelector(discoveredRoots, currentRepositoryRoot)
                 filesPanel.repositoryRootPath = currentRepoPath()
                 resetAnalysisState()
+                codeStatisticsPanel.onScopeChanged()
                 val selectedRoot = currentRepositoryRoot
                 if (selectedRoot != null) {
                     loadBranchesFor(selectedRoot)
@@ -1069,6 +1108,8 @@ class HeatmapToolWindowContentBuilder {
         val commitScoredFiles: Map<String, List<com.githeatmap.engine.ScoredFile>>,
         val filteredCommits: List<CommitEvent>,
         val commitEfforts: List<CommitEffortMetrics>,
+        val statisticsCommits: List<CommitEvent>,
+        val statisticsCommitEfforts: List<CommitEffortMetrics>,
         val totalEffort: EstimatedEffort,
         val commitCount: Int,
         val totalAdded: Int,
@@ -1086,6 +1127,8 @@ class HeatmapToolWindowContentBuilder {
                 commitScoredFiles = emptyMap(),
                 filteredCommits = emptyList(),
                 commitEfforts = emptyList(),
+                statisticsCommits = emptyList(),
+                statisticsCommitEfforts = emptyList(),
                 totalEffort = EstimatedEffort.ZERO,
                 commitCount = 0,
                 totalAdded = 0,
