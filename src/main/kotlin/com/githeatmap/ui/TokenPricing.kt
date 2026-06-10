@@ -76,15 +76,19 @@ private data class ClaudePricing(
         outputTokens: Long
     ): Double {
         return inputTokens.cost(inputPerMillion) +
-            (cacheCreation5mTokens + cacheCreation1hTokens).cost(cacheCreation5mPerMillion) +
-            cacheReadTokens.cost(cacheReadPerMillion) +
-            outputTokens.cost(outputPerMillion)
+                (cacheCreation5mTokens + cacheCreation1hTokens).cost(cacheCreation5mPerMillion) +
+                cacheReadTokens.cost(cacheReadPerMillion) +
+                outputTokens.cost(outputPerMillion)
     }
 
     companion object {
         fun forModel(model: String?): PricingMatch<ClaudePricing>? {
             val normalized = model?.lowercase().orEmpty()
             return when {
+                normalized.contains("fable-5") -> FABLE_5.exact()
+                normalized.contains("fable") -> FABLE_5.fallback()
+                normalized.contains("mythos-5") -> MYTHOS_5.exact()
+                normalized.contains("mythos") -> MYTHOS_5.fallback()
                 normalized.contains("opus-4-8") -> OPUS_45_PLUS.exact()
                 normalized.contains("opus-4-7") -> OPUS_45_PLUS.exact()
                 normalized.contains("opus-4-6") -> OPUS_45_PLUS.exact()
@@ -102,6 +106,22 @@ private data class ClaudePricing(
             }
         }
 
+        private val FABLE_5 = ClaudePricing(
+            inputPerMillion = 10.0,
+            cacheCreation5mPerMillion = 12.50,
+            cacheCreation1hPerMillion = 20.0,
+            cacheReadPerMillion = 1.0,
+            outputPerMillion = 50.0,
+            supportsDataResidencyMultiplier = true
+        )
+        private val MYTHOS_5 = ClaudePricing(
+            inputPerMillion = 10.0,
+            cacheCreation5mPerMillion = 12.50,
+            cacheCreation1hPerMillion = 20.0,
+            cacheReadPerMillion = 1.0,
+            outputPerMillion = 50.0,
+            supportsDataResidencyMultiplier = true
+        )
         private val OPUS_45_PLUS = ClaudePricing(
             inputPerMillion = 5.0,
             cacheCreation5mPerMillion = 6.25,
@@ -150,8 +170,8 @@ private data class OpenAiPricing(
 ) {
     fun costUsd(inputTokens: Long, cachedInputTokens: Long, outputTokens: Long): Double {
         return inputTokens.cost(inputPerMillion) +
-            cachedInputTokens.cost(cachedInputPerMillion) +
-            outputTokens.cost(outputPerMillion)
+                cachedInputTokens.cost(cachedInputPerMillion) +
+                outputTokens.cost(outputPerMillion)
     }
 
     companion object {

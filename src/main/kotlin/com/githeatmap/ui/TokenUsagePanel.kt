@@ -56,7 +56,10 @@ class TokenUsagePanel(private val project: Project) : JPanel(BorderLayout(8, 8))
         }
 
         add(toolbar, BorderLayout.NORTH)
-        add(JScrollPane(tables).apply { preferredSize = Dimension(980, 620) }, BorderLayout.CENTER)
+        add(JScrollPane(tables).apply {
+            preferredSize = Dimension(980, 620)
+            tuneTokenUsageScrolling()
+        }, BorderLayout.CENTER)
         reload()
     }
 
@@ -89,7 +92,7 @@ class TokenUsagePanel(private val project: Project) : JPanel(BorderLayout(8, 8))
             maximumSize = Dimension(Int.MAX_VALUE, 220)
             preferredSize = Dimension(940, 220)
             add(JLabel(title).apply { font = font.deriveFont(java.awt.Font.BOLD, 13f) }, BorderLayout.NORTH)
-            add(JScrollPane(table), BorderLayout.CENTER)
+            add(JScrollPane(table).apply { tuneTokenUsageScrolling() }, BorderLayout.CENTER)
         }
     }
 
@@ -125,6 +128,13 @@ class TokenUsagePanel(private val project: Project) : JPanel(BorderLayout(8, 8))
     private fun format(value: Int): String = NumberFormat.getIntegerInstance(Locale.US).format(value)
 
     private fun formatUsd(value: Double): String = NumberFormat.getCurrencyInstance(Locale.US).format(value)
+
+    private fun JScrollPane.tuneTokenUsageScrolling() {
+        verticalScrollBar.unitIncrement = 28
+        verticalScrollBar.blockIncrement = 220
+        horizontalScrollBar.unitIncrement = 28
+        horizontalScrollBar.blockIncrement = 220
+    }
 }
 
 private class TokenUsageTableModel(private val showReasoning: Boolean) : AbstractTableModel() {

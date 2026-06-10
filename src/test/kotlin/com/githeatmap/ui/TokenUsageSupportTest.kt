@@ -40,6 +40,33 @@ class TokenUsageSupportTest {
     }
 
     @Test
+    fun `claude fable and mythos 5 pricing is supported`() {
+        val fable = TokenPricing.claudeCostUsd(
+            model = "claude-fable-5-20260601",
+            inputTokens = 1_000_000,
+            cacheCreation5mTokens = 1_000_000,
+            cacheCreation1hTokens = 0,
+            cacheCreationUnclassifiedTokens = 0,
+            cacheReadTokens = 1_000_000,
+            outputTokens = 1_000_000,
+            inferenceGeo = null
+        )
+        val mythos = TokenPricing.claudeCostUsd(
+            model = "claude-mythos-5-20260601",
+            inputTokens = 1_000_000,
+            cacheCreation5mTokens = 1_000_000,
+            cacheCreation1hTokens = 0,
+            cacheCreationUnclassifiedTokens = 0,
+            cacheReadTokens = 1_000_000,
+            outputTokens = 1_000_000,
+            inferenceGeo = null
+        )
+
+        assertEquals(73.5, fable.usd, 0.000001, "Fable 5 cost")
+        assertEquals(73.5, mythos.usd, 0.000001, "Mythos 5 cost")
+    }
+
+    @Test
     fun `claude monthly totals match ccusage`() {
         val home = File(System.getProperty("user.home"))
         val roots = listOf(
