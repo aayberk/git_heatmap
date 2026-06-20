@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.io.IOException
 import java.time.YearMonth
@@ -14,6 +15,114 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class TokenUsageSupportTest {
+    @Test
+    fun `codex usage can be filtered by repository root`(@TempDir tempDir: File) {
+        val repoA = tempDir.resolve("repo-a").apply { mkdirs() }
+        val repoB = tempDir.resolve("repo-b").apply { mkdirs() }
+        val sessions = tempDir.resolve("codex/sessions").apply { mkdirs() }
+        sessions.resolve("usage.jsonl").writeText(
+            """
+            {"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"cwd":"${repoA.absolutePath.jsonEscaped()}"}}
+            {"timestamp":"2026-01-01T00:01:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":10,"output_tokens":5,"reasoning_output_tokens":2}}}}
+            {"timestamp":"2026-01-01T00:02:00Z","type":"turn_context","payload":{"cwd":"${repoB.absolutePath.jsonEscaped()}","model":"gpt-5-codex"}}
+            {"timestamp":"2026-01-01T00:03:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":20,"output_tokens":10,"reasoning_output_tokens":4}}}}
+            """.trimIndent()
+        )
+
+        val result = TokenUsageSupport.readCodexUsage(
+            roots = listOf(tempDir.resolve("codex")),
+            repositoryRoot = repoA
+        )
+        val row = result.rows.first { it.month == "2026-01" }
+
+        assertEquals(100, row.inputTokens)
+        assertEquals(10, row.cacheReadTokens)
+        assertEquals(5, row.outputTokens)
+        assertEquals(105, row.totalTokens)
+    }
+
+    @Test
+    fun `claude repository filter supports hyphenated project names`(@TempDir tempDir: File) {
+        val repo = tempDir.resolve("pmp-cloud").apply { mkdirs() }
+        val sibling = tempDir.resolve("pmp-cloud2").apply { mkdirs() }
+        val claudeRoot = tempDir.resolve("claude")
+        val repoProject = claudeRoot.resolve("projects/${repo.canonicalPath.toClaudeProjectKey()}").apply { mkdirs() }
+        val siblingProject = claudeRoot.resolve("projects/${sibling.canonicalPath.toClaudeProjectKey()}").apply { mkdirs() }
+        repoProject.resolve("repo.jsonl").writeText(claudeUsageLine("repo-usage", inputTokens = 100))
+        siblingProject.resolve("sibling.jsonl").writeText(claudeUsageLine("sibling-usage", inputTokens = 300))
+
+        val result = TokenUsageSupport.readClaudeUsage(
+            roots = listOf(claudeRoot),
+            repositoryRoot = repo
+        )
+        val row = result.rows.first { it.month == "2026-01" }
+
+        assertEquals(100, row.inputTokens)
+        assertEquals(100, row.totalTokens)
+    }
+
+    @Test
+    fun `claude repository filter includes historical project name variants`(@TempDir tempDir: File) {
+        val repo = tempDir.resolve("pmp-cloud").apply { mkdirs() }
+        val historicalVariant = tempDir.resolve("pmp-cloud-donusum").apply { mkdirs() }
+        val unrelated = tempDir.resolve("pmpweb").apply { mkdirs() }
+        val claudeRoot = tempDir.resolve("claude")
+        val repoProject = claudeRoot.resolve("projects/${repo.canonicalPath.toClaudeProjectKey()}").apply { mkdirs() }
+        val historicalProject = claudeRoot.resolve("projects/${historicalVariant.canonicalPath.toClaudeProjectKey()}").apply { mkdirs() }
+        val unrelatedProject = claudeRoot.resolve("projects/${unrelated.canonicalPath.toClaudeProjectKey()}").apply { mkdirs() }
+        repoProject.resolve("repo.jsonl").writeText(claudeUsageLine("repo-usage", inputTokens = 100))
+        historicalProject.resolve("historical.jsonl").writeText(claudeUsageLine("historical-usage", inputTokens = 300))
+        unrelatedProject.resolve("unrelated.jsonl").writeText(claudeUsageLine("unrelated-usage", inputTokens = 900))
+
+        val result = TokenUsageSupport.readClaudeUsage(
+            roots = listOf(claudeRoot),
+            repositoryRoot = repo
+        )
+        val row = result.rows.first { it.month == "2026-01" }
+
+        assertEquals(400, row.inputTokens)
+        assertEquals(400, row.totalTokens)
+    }
+
+    @Test
+    fun `claude usage can be grouped daily`(@TempDir tempDir: File) {
+        val claudeRoot = tempDir.resolve("claude")
+        val project = claudeRoot.resolve("projects/${tempDir.resolve("repo").canonicalPath.toClaudeProjectKey()}").apply { mkdirs() }
+        project.resolve("daily.jsonl").writeText(
+            """
+            ${claudeUsageLine("day-1-a", inputTokens = 100, timestamp = "2026-01-01T10:00:00Z")}
+            ${claudeUsageLine("day-1-b", inputTokens = 200, timestamp = "2026-01-01T11:00:00Z")}
+            ${claudeUsageLine("day-2", inputTokens = 300, timestamp = "2026-01-02T10:00:00Z")}
+            """.trimIndent()
+        )
+
+        val result = TokenUsageSupport.readClaudeUsage(
+            roots = listOf(claudeRoot),
+            period = TokenUsagePeriod.Daily
+        )
+
+        assertEquals(300, result.rows.first { it.month == "2026-01-01" }.inputTokens)
+        assertEquals(300, result.rows.first { it.month == "2026-01-02" }.inputTokens)
+        assertEquals(600, result.rows.first { it.isTotal }.inputTokens)
+    }
+
+    @Test
+    fun `claude usage remains grouped monthly by default`(@TempDir tempDir: File) {
+        val claudeRoot = tempDir.resolve("claude")
+        val project = claudeRoot.resolve("projects/${tempDir.resolve("repo").canonicalPath.toClaudeProjectKey()}").apply { mkdirs() }
+        project.resolve("monthly.jsonl").writeText(
+            """
+            ${claudeUsageLine("jan", inputTokens = 100, timestamp = "2026-01-01T10:00:00Z")}
+            ${claudeUsageLine("feb", inputTokens = 300, timestamp = "2026-02-01T10:00:00Z")}
+            """.trimIndent()
+        )
+
+        val result = TokenUsageSupport.readClaudeUsage(roots = listOf(claudeRoot))
+
+        assertEquals(100, result.rows.first { it.month == "2026-01" }.inputTokens)
+        assertEquals(300, result.rows.first { it.month == "2026-02" }.inputTokens)
+    }
+
     @Test
     fun `new model names use latest known pricing fallback`() {
         val codex = TokenPricing.openAiCostUsd(
@@ -167,6 +276,24 @@ class TokenUsageSupportTest {
         return runCatching {
             if (value.isJsonPrimitive && value.asJsonPrimitive.isNumber) value.asDouble else 0.0
         }.getOrDefault(0.0)
+    }
+
+    private fun String.jsonEscaped(): String {
+        return replace("\\", "\\\\").replace("\"", "\\\"")
+    }
+
+    private fun String.toClaudeProjectKey(): String {
+        return replace("/", "-")
+    }
+
+    private fun claudeUsageLine(
+        id: String,
+        inputTokens: Long,
+        timestamp: String = "2026-01-01T00:00:00Z"
+    ): String {
+        return """
+            {"timestamp":"$timestamp","type":"assistant","message":{"id":"$id","role":"assistant","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":$inputTokens,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}
+        """.trimIndent()
     }
 
     private data class ExpectedUsage(

@@ -4,6 +4,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 
@@ -11,33 +12,42 @@ internal object TokenUsageSupport {
     fun readClaudeUsage(
         roots: List<File>,
         zoneId: ZoneId = ZoneId.systemDefault(),
-        maxFiles: Int = DEFAULT_MAX_FILES
+        maxFiles: Int = DEFAULT_MAX_FILES,
+        repositoryRoot: File? = null,
+        period: TokenUsagePeriod = TokenUsagePeriod.Monthly
     ): TokenUsageResult {
+        val filter = TokenUsageRepositoryFilter(repositoryRoot)
         val files = roots.flatMap { root ->
             val projects = if (root.name == "projects") root else root.resolve("projects")
             projects.jsonlFiles(maxFiles)
         }.distinctBy { it.safeCanonicalPath() }
-        val usageByMonth = linkedMapOf<YearMonth, TokenBreakdown>()
+        val usageByPeriod = linkedMapOf<String, TokenBreakdown>()
         val seenUsageIds = mutableSetOf<String>()
         files.forEach { file ->
+            val claudeProjectKey = file.claudeProjectKey()
+            var currentWorkspacePath: String? = null
             file.forEachLineSafely { line ->
-                if (!line.contains(""""usage"""")) return@forEachLineSafely
                 val json = jsonObject(line) ?: return@forEachLineSafely
+                currentWorkspacePath = json.stringMember("cwd")
+                    ?: json.stringMember("project")
+                            ?: currentWorkspacePath
+                if (!line.contains(""""usage"""")) return@forEachLineSafely
                 val message = json.objectMember("message")
                 if (!isClaudeAssistantUsage(json, message)) return@forEachLineSafely
+                if (!filter.matches(currentWorkspacePath, claudeProjectKey)) return@forEachLineSafely
                 val usage = message?.objectMember("usage") ?: json.objectMember("usage") ?: return@forEachLineSafely
                 val usageId = message?.stringMember("id") ?: json.stringMember("requestId")
                 if (usageId != null && !seenUsageIds.add(usageId)) return@forEachLineSafely
-                val month = monthForJson(json, file, zoneId)
+                val periodKey = period.keyForJson(json, file, zoneId)
                 val cacheCreationTokens = usage.longMember("cache_creation_input_tokens")
                 val cacheCreation = usage.objectMember("cache_creation")
                 val cacheCreation5mTokens = cacheCreation?.longMember("ephemeral_5m_input_tokens") ?: 0
                 val cacheCreation1hTokens = cacheCreation?.longMember("ephemeral_1h_input_tokens") ?: 0
                 val cacheCreationUnclassifiedTokens = (
-                    cacheCreationTokens -
-                        cacheCreation5mTokens -
-                        cacheCreation1hTokens
-                    ).coerceAtLeast(0)
+                        cacheCreationTokens -
+                                cacheCreation5mTokens -
+                                cacheCreation1hTokens
+                        ).coerceAtLeast(0)
                 val inputTokens = usage.longMember("input_tokens")
                 val cacheReadTokens = usage.longMember("cache_read_input_tokens")
                 val outputTokens = usage.longMember("output_tokens")
@@ -51,7 +61,7 @@ internal object TokenUsageSupport {
                     outputTokens = outputTokens,
                     inferenceGeo = usage.stringMember("inference_geo")
                 )
-                usageByMonth[month] = usageByMonth.getOrDefault(month, TokenBreakdown.ZERO) + TokenBreakdown(
+                usageByPeriod[periodKey] = usageByPeriod.getOrDefault(periodKey, TokenBreakdown.ZERO) + TokenBreakdown(
                     inputTokens = inputTokens,
                     cacheCreationTokens = cacheCreationTokens,
                     cacheReadTokens = cacheReadTokens,
@@ -61,34 +71,44 @@ internal object TokenUsageSupport {
                 )
             }
         }
-        return TokenUsageResult(usageByMonth.toRows(), files.size)
+        return TokenUsageResult(usageByPeriod.toRows(), files.size)
     }
 
     fun readCodexUsage(
         roots: List<File>,
         zoneId: ZoneId = ZoneId.systemDefault(),
-        maxFiles: Int = DEFAULT_MAX_FILES
+        maxFiles: Int = DEFAULT_MAX_FILES,
+        repositoryRoot: File? = null,
+        period: TokenUsagePeriod = TokenUsagePeriod.Monthly
     ): TokenUsageResult {
+        val filter = TokenUsageRepositoryFilter(repositoryRoot)
         val files = roots.flatMap { root ->
             val sessions = root.resolve("sessions")
             if (sessions.isDirectory) sessions.jsonlFiles(maxFiles) else root.jsonlFiles(maxFiles)
         }.distinctBy { it.safeCanonicalPath() }
-        val usageByMonth = linkedMapOf<YearMonth, TokenBreakdown>()
+        val usageByPeriod = linkedMapOf<String, TokenBreakdown>()
         files.forEach { file ->
             var currentModel: String? = null
+            var currentWorkspacePath: String? = null
             file.forEachLineSafely { line ->
                 val json = jsonObject(line) ?: return@forEachLineSafely
                 val payload = json.objectMember("payload") ?: return@forEachLineSafely
+                if (json.stringMember("type") == "session_meta") {
+                    currentWorkspacePath = payload.stringMember("cwd") ?: currentWorkspacePath
+                    return@forEachLineSafely
+                }
                 if (json.stringMember("type") == "turn_context") {
+                    currentWorkspacePath = payload.stringMember("cwd") ?: currentWorkspacePath
                     currentModel = payload.stringMember("model")
                         ?: payload.objectMember("collaboration_mode")?.stringMember("model")
-                        ?: currentModel
+                                ?: currentModel
                     return@forEachLineSafely
                 }
                 if (!line.contains(""""token_count"""") || !line.contains(""""last_token_usage"""")) {
                     return@forEachLineSafely
                 }
                 if (payload.stringMember("type") != "token_count") return@forEachLineSafely
+                if (!filter.matches(currentWorkspacePath)) return@forEachLineSafely
                 val usage = payload
                     .objectMember("info")
                     ?.objectMember("last_token_usage")
@@ -113,11 +133,11 @@ internal object TokenUsageSupport {
                 )
                 if (currentUsage.totalTokens <= 0) return@forEachLineSafely
 
-                val month = monthForJson(json, file, zoneId)
-                usageByMonth[month] = usageByMonth.getOrDefault(month, TokenBreakdown.ZERO) + currentUsage
+                val periodKey = period.keyForJson(json, file, zoneId)
+                usageByPeriod[periodKey] = usageByPeriod.getOrDefault(periodKey, TokenBreakdown.ZERO) + currentUsage
             }
         }
-        return TokenUsageResult(usageByMonth.toRows(), files.size)
+        return TokenUsageResult(usageByPeriod.toRows(), files.size)
     }
 
     fun numberValue(content: String, key: String): Long {
@@ -143,7 +163,7 @@ internal object TokenUsageSupport {
 
     fun isClaudeAssistantUsageLine(line: String): Boolean {
         return stringValue(line, "type") == "assistant" ||
-            objectBlock(line, "message")?.let { block -> stringValue(block, "role") == "assistant" } == true
+                objectBlock(line, "message")?.let { block -> stringValue(block, "role") == "assistant" } == true
     }
 
     fun claudeUsageBlock(line: String): String? {
@@ -213,13 +233,20 @@ internal object TokenUsageSupport {
         return blocks
     }
 
-    fun Map<YearMonth, TokenBreakdown>.toRows(): List<TokenUsageRow> {
+    fun Map<String, TokenBreakdown>.toRows(): List<TokenUsageRow> {
         if (isEmpty()) return listOf(TokenBreakdown.ZERO.toRow("", isTotal = true))
         val monthlyRows = entries
             .sortedBy { it.key }
-            .map { entry -> entry.value.toRow(month = entry.key.toString()) }
+            .map { entry -> entry.value.toRow(month = entry.key) }
         val total = values.fold(TokenBreakdown.ZERO) { aggregate, usage -> aggregate + usage }
         return monthlyRows + total.toRow("Total", isTotal = true)
+    }
+
+    private fun TokenUsagePeriod.keyForJson(json: JsonObject, file: File, zoneId: ZoneId): String {
+        return when (this) {
+            TokenUsagePeriod.Monthly -> monthForJson(json, file, zoneId).toString()
+            TokenUsagePeriod.Daily -> dayForJson(json, file, zoneId).toString()
+        }
     }
 
     private fun monthForTimestamp(timestamp: String?, zoneId: ZoneId): YearMonth? {
@@ -231,6 +258,22 @@ internal object TokenUsageSupport {
 
     private fun monthForFile(file: File, zoneId: ZoneId): YearMonth {
         return YearMonth.from(Instant.ofEpochMilli(file.lastModified()).atZone(zoneId))
+    }
+
+    private fun dayForJson(json: JsonObject, file: File, zoneId: ZoneId): LocalDate {
+        val timestamp = json.stringMember("timestamp") ?: json.stringMember("time") ?: json.stringMember("createdAt")
+        return dayForTimestamp(timestamp, zoneId) ?: dayForFile(file, zoneId)
+    }
+
+    private fun dayForTimestamp(timestamp: String?, zoneId: ZoneId): LocalDate? {
+        if (timestamp.isNullOrBlank()) return null
+        return runCatching {
+            Instant.parse(timestamp).atZone(zoneId).toLocalDate()
+        }.getOrNull()
+    }
+
+    private fun dayForFile(file: File, zoneId: ZoneId): LocalDate {
+        return Instant.ofEpochMilli(file.lastModified()).atZone(zoneId).toLocalDate()
     }
 
     private fun File.jsonlFiles(maxFiles: Int): List<File> {
@@ -254,6 +297,14 @@ internal object TokenUsageSupport {
 
     private fun File.safeCanonicalPath(): String = runCatching { canonicalPath }.getOrDefault(absolutePath)
 
+    private fun File.claudeProjectKey(): String? {
+        var directory = parentFile ?: return null
+        while (directory.parentFile?.name != "projects") {
+            directory = directory.parentFile ?: return null
+        }
+        return directory.name.takeIf { it.startsWith("-") }
+    }
+
     private const val DEFAULT_MAX_FILES = 20_000
 
     private fun jsonObject(content: String): JsonObject? {
@@ -276,6 +327,60 @@ internal object TokenUsageSupport {
             if (value.isJsonPrimitive && value.asJsonPrimitive.isNumber) value.asLong else 0
         }.getOrDefault(0)
     }
+}
+
+private class TokenUsageRepositoryFilter(repositoryRoot: File?) {
+    private val rootPath = repositoryRoot?.normalizedAbsolutePath()
+    private val rootClaudeProjectKey = rootPath?.toClaudeProjectKey()
+    private val claudeProjectKeys = rootPath
+        ?.let { path -> path.ancestorPaths() }
+        ?.map { path -> path.toClaudeProjectKey() }
+        ?.toSet()
+
+    fun matches(workspacePath: String?, claudeProjectKey: String? = null): Boolean {
+        val root = rootPath ?: return true
+        val workspaceMatches = workspacePath?.let { workspacePath ->
+            val workspace = File(workspacePath).normalizedAbsolutePath()
+            workspace == root ||
+                    workspace.startsWith("$root/") ||
+                    root.startsWith("$workspace/")
+        } ?: false
+        if (workspaceMatches) return true
+
+        val keys = claudeProjectKeys ?: return false
+        return claudeProjectKey != null &&
+                (claudeProjectKey in keys || claudeProjectKey.isClaudeProjectVariantOfRoot())
+    }
+
+    private fun File.normalizedAbsolutePath(): String {
+        return runCatching { canonicalFile.absolutePath }
+            .getOrDefault(absoluteFile.absolutePath)
+            .trimEnd('/')
+    }
+
+    private fun String.ancestorPaths(): List<String> {
+        return buildList {
+            var current = this@ancestorPaths.trimEnd('/')
+            while (current.isNotBlank() && current != "/") {
+                add(current)
+                current = current.substringBeforeLast('/', missingDelimiterValue = "")
+            }
+        }
+    }
+
+    private fun String.toClaudeProjectKey(): String {
+        return replace("/", "-")
+    }
+
+    private fun String.isClaudeProjectVariantOfRoot(): Boolean {
+        val rootKey = rootClaudeProjectKey ?: return false
+        return startsWith("$rootKey-")
+    }
+}
+
+internal enum class TokenUsagePeriod(val title: String) {
+    Monthly("Monthly"),
+    Daily("Daily")
 }
 
 internal data class TokenUsageResult(

@@ -1,49 +1,93 @@
 package com.githeatmap.ui
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
+import java.awt.BasicStroke
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Component
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
+import java.awt.Insets
 import java.awt.Rectangle
 import java.awt.RenderingHints
 import java.awt.event.MouseEvent
 import java.io.File
 import java.text.NumberFormat
+import java.time.LocalDate
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.ButtonGroup
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JLabel
+import javax.swing.JMenuItem
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
+import javax.swing.JProgressBar
 import javax.swing.JScrollPane
 import javax.swing.JTable
 import javax.swing.JToggleButton
 import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 import javax.swing.ToolTipManager
+import javax.swing.Icon
 import javax.swing.table.AbstractTableModel
 import javax.swing.table.DefaultTableCellRenderer
 
 class TokenUsagePanel(private val project: Project) : JPanel(BorderLayout(8, 8)) {
     private val statusLabel = JLabel("No token usage data loaded")
     private val reloadButton = JButton("Reload")
+    private val loadingBar = JProgressBar().apply {
+        isIndeterminate = true
+        isVisible = false
+        preferredSize = Dimension(92, 14)
+        maximumSize = Dimension(92, 14)
+    }
+    private val globalScopeToggle = JToggleButton("Global", true)
+    private val repositoryScopeToggle = JToggleButton("Repository")
+    private val monthlyPeriodToggle = JToggleButton("Monthly", true)
+    private val dailyPeriodToggle = JToggleButton("Daily")
     private val claudeModel = TokenUsageTableModel(showReasoning = false)
     private val codexModel = TokenUsageTableModel(showReasoning = true)
-    private val trendPanel = TokenUsageTrendPanel()
+    private val providerTableScrollPanes = mutableListOf<JScrollPane>()
+    private val loadGeneration = AtomicInteger()
+    private val trendPanel = TokenUsageTrendPanel(
+        globalScopeToggle,
+        repositoryScopeToggle,
+        monthlyPeriodToggle,
+        dailyPeriodToggle
+    )
 
     init {
         border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
         reloadButton.addActionListener { reload() }
+        ButtonGroup().apply {
+            add(globalScopeToggle)
+            add(repositoryScopeToggle)
+        }
+        ButtonGroup().apply {
+            add(monthlyPeriodToggle)
+            add(dailyPeriodToggle)
+        }
+        repositoryScopeToggle.isEnabled = project.basePath != null
+        globalScopeToggle.addActionListener { reload() }
+        repositoryScopeToggle.addActionListener { reload() }
+        monthlyPeriodToggle.addActionListener { reload() }
+        dailyPeriodToggle.addActionListener { reload() }
 
         val toolbar = Box.createHorizontalBox().apply {
             add(JLabel("Token Usage"))
             add(Box.createHorizontalStrut(12))
             add(statusLabel)
             add(Box.createHorizontalGlue())
+            add(loadingBar)
+            add(Box.createHorizontalStrut(8))
             add(reloadButton)
         }
 
@@ -64,18 +108,66 @@ class TokenUsagePanel(private val project: Project) : JPanel(BorderLayout(8, 8))
     }
 
     fun reload() {
-        val claude = TokenUsageSupport.readClaudeUsage(claudeRoots())
-        val codex = TokenUsageSupport.readCodexUsage(codexRoots())
-        claudeModel.update(claude.rows)
-        codexModel.update(codex.rows)
-        trendPanel.update(claude.rows, codex.rows)
-        val rows = claude.rows + codex.rows
-        val files = claude.filesScanned + codex.filesScanned
+        val generation = loadGeneration.incrementAndGet()
+        val repositoryRoot = selectedRepositoryRoot()
+        val period = selectedPeriod()
+        val startDate = selectedStartDate(period)
+        val claudeRoots = claudeRoots()
+        val codexRoots = codexRoots()
+        setLoading(true, period, repositoryRoot)
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val result = runCatching {
+                TokenUsageLoadResult(
+                    claude = TokenUsageSupport.readClaudeUsage(
+                        claudeRoots,
+                        repositoryRoot = repositoryRoot,
+                        period = period
+                    ),
+                    codex = TokenUsageSupport.readCodexUsage(
+                        codexRoots,
+                        repositoryRoot = repositoryRoot,
+                        period = period
+                    ),
+                    repositoryRoot = repositoryRoot,
+                    period = period,
+                    startDate = startDate
+                )
+            }
+            SwingUtilities.invokeLater {
+                if (generation != loadGeneration.get()) return@invokeLater
+                setLoading(false, period, repositoryRoot)
+                result
+                    .onSuccess { applyLoadResult(it) }
+                    .onFailure { error -> statusLabel.text = "Token usage load failed: ${error.message ?: error.javaClass.simpleName}" }
+            }
+        }
+    }
+
+    private fun applyLoadResult(result: TokenUsageLoadResult) {
+        claudeModel.update(result.claude.rows)
+        codexModel.update(result.codex.rows)
+        scrollProviderTablesToBottom()
+        trendPanel.update(result.claude.rows, result.codex.rows, result.period, result.startDate)
+        val rows = result.claude.rows + result.codex.rows
+        val files = result.claude.filesScanned + result.codex.filesScanned
         val total = rows.filter { it.isTotal }.sumOf { it.totalTokens }
         val price = rows.filter { it.isTotal }.sumOf { it.priceUsd }
         val fallbackCount = rows.filter { it.isTotal }.sumOf { it.fallbackPriceCount }
+        val scope = scopeTitle(result.repositoryRoot)
         val fallbackNote = if (fallbackCount > 0) " | Latest known pricing used for ${format(fallbackCount)} records" else ""
-        statusLabel.text = "Scanned ${format(files)} local usage files | Total ${format(total)} tokens | Estimated ${formatUsd(price)}$fallbackNote"
+        statusLabel.text = "${result.period.title} | $scope | Scanned ${format(files)} local usage files | Total ${format(total)} tokens | Estimated ${formatUsd(price)}$fallbackNote"
+    }
+
+    private fun setLoading(loading: Boolean, period: TokenUsagePeriod, repositoryRoot: File?) {
+        loadingBar.isVisible = loading
+        reloadButton.isEnabled = !loading
+        if (loading) {
+            statusLabel.text = "Loading ${period.title} token usage | ${scopeTitle(repositoryRoot)}"
+        }
+    }
+
+    private fun scopeTitle(repositoryRoot: File?): String {
+        return repositoryRoot?.let { "Repository ${it.name}" } ?: "Global"
     }
 
     private fun providerSection(title: String, model: TokenUsageTableModel): JPanel {
@@ -87,12 +179,23 @@ class TokenUsagePanel(private val project: Project) : JPanel(BorderLayout(8, 8))
             setDefaultRenderer(String::class.java, TokenUsageTextRenderer(model))
             rowHeight = 24
         }
+        val scrollPane = JScrollPane(table).apply { tuneTokenUsageScrolling() }
+        providerTableScrollPanes += scrollPane
         return JPanel(BorderLayout(0, 6)).apply {
             border = BorderFactory.createEmptyBorder(0, 0, 0, 0)
             maximumSize = Dimension(Int.MAX_VALUE, 220)
             preferredSize = Dimension(940, 220)
             add(JLabel(title).apply { font = font.deriveFont(java.awt.Font.BOLD, 13f) }, BorderLayout.NORTH)
-            add(JScrollPane(table).apply { tuneTokenUsageScrolling() }, BorderLayout.CENTER)
+            add(scrollPane, BorderLayout.CENTER)
+        }
+    }
+
+    private fun scrollProviderTablesToBottom() {
+        SwingUtilities.invokeLater {
+            providerTableScrollPanes.forEach { scrollPane ->
+                val verticalScrollBar = scrollPane.verticalScrollBar
+                verticalScrollBar.value = verticalScrollBar.maximum
+            }
         }
     }
 
@@ -122,6 +225,22 @@ class TokenUsagePanel(private val project: Project) : JPanel(BorderLayout(8, 8))
     }
 
     private fun homeDir(): File = File(System.getProperty("user.home"))
+
+    private fun selectedRepositoryRoot(): File? {
+        return if (repositoryScopeToggle.isSelected) {
+            project.basePath?.let { File(it) }
+        } else {
+            null
+        }
+    }
+
+    private fun selectedPeriod(): TokenUsagePeriod {
+        return if (dailyPeriodToggle.isSelected) TokenUsagePeriod.Daily else TokenUsagePeriod.Monthly
+    }
+
+    private fun selectedStartDate(period: TokenUsagePeriod): LocalDate? {
+        return if (period == TokenUsagePeriod.Daily) LocalDate.now().minusMonths(3) else null
+    }
 
     private fun format(value: Long): String = NumberFormat.getIntegerInstance(Locale.US).format(value)
 
@@ -191,8 +310,16 @@ private class TokenUsageTableModel(private val showReasoning: Boolean) : Abstrac
     fun fallbackPriceCount(rowIndex: Int): Int = rows.getOrNull(rowIndex)?.fallbackPriceCount ?: 0
 }
 
+private data class TokenUsageLoadResult(
+    val claude: TokenUsageResult,
+    val codex: TokenUsageResult,
+    val repositoryRoot: File?,
+    val period: TokenUsagePeriod,
+    val startDate: LocalDate?
+)
+
 private enum class TokenUsageColumn(val title: String) {
-    Month("Month"),
+    Month("Period"),
     Input("Input"),
     CacheWrite("Cache Write"),
     CacheRead("Cache Read"),
@@ -202,13 +329,24 @@ private enum class TokenUsageColumn(val title: String) {
     Price("Price")
 }
 
-private class TokenUsageTrendPanel : JPanel(BorderLayout(0, 8)) {
+private class TokenUsageTrendPanel(
+    private val globalScopeToggle: JToggleButton,
+    private val repositoryScopeToggle: JToggleButton,
+    private val monthlyPeriodToggle: JToggleButton,
+    private val dailyPeriodToggle: JToggleButton
+) : JPanel(BorderLayout(0, 8)) {
     private val chart = TokenUsageChart()
     private val claudeToggle = JCheckBox("Claude", true)
     private val codexToggle = JCheckBox("Codex", true)
     private val tokensToggle = JToggleButton("Tokens", true)
     private val priceToggle = JToggleButton("Price")
     private val titleLabel = JLabel("Monthly total tokens")
+    private val scopeChip = FilterChipButton()
+    private val periodChip = FilterChipButton()
+    private val metricChip = FilterChipButton()
+    private val providersChip = FilterChipButton()
+    private var period = TokenUsagePeriod.Monthly
+    private var startDate: LocalDate? = null
 
     init {
         border = BorderFactory.createCompoundBorder(
@@ -222,26 +360,30 @@ private class TokenUsageTrendPanel : JPanel(BorderLayout(0, 8)) {
             add(tokensToggle)
             add(priceToggle)
         }
+        scopeChip.addActionListener { showScopeMenu() }
+        periodChip.addActionListener { showPeriodMenu() }
+        metricChip.addActionListener { showMetricMenu() }
+        providersChip.addActionListener { showProvidersMenu() }
+        updateChips()
 
         val header = Box.createHorizontalBox().apply {
             add(titleLabel.apply { font = font.deriveFont(java.awt.Font.BOLD, 13f) })
             add(Box.createHorizontalGlue())
-            add(tokensToggle)
-            add(priceToggle)
-            add(Box.createHorizontalStrut(14))
-            add(colorSwatch(TOKEN_USAGE_CLAUDE_COLOR))
-            add(Box.createHorizontalStrut(6))
-            add(claudeToggle)
-            add(Box.createHorizontalStrut(12))
-            add(colorSwatch(TOKEN_USAGE_CODEX_COLOR))
-            add(Box.createHorizontalStrut(6))
-            add(codexToggle)
+            add(scopeChip)
+            add(Box.createHorizontalStrut(8))
+            add(periodChip)
+            add(Box.createHorizontalStrut(8))
+            add(metricChip)
+            add(Box.createHorizontalStrut(8))
+            add(providersChip)
         }
         claudeToggle.addActionListener {
             chart.setSeriesVisibility(showClaude = claudeToggle.isSelected, showCodex = codexToggle.isSelected)
+            updateChips()
         }
         codexToggle.addActionListener {
             chart.setSeriesVisibility(showClaude = claudeToggle.isSelected, showCodex = codexToggle.isSelected)
+            updateChips()
         }
         tokensToggle.addActionListener { setMetric(TokenUsageChartMetric.Tokens) }
         priceToggle.addActionListener { setMetric(TokenUsageChartMetric.Price) }
@@ -250,33 +392,160 @@ private class TokenUsageTrendPanel : JPanel(BorderLayout(0, 8)) {
         add(chart, BorderLayout.CENTER)
     }
 
-    fun update(claudeRows: List<TokenUsageRow>, codexRows: List<TokenUsageRow>) {
+    fun update(
+        claudeRows: List<TokenUsageRow>,
+        codexRows: List<TokenUsageRow>,
+        period: TokenUsagePeriod,
+        startDate: LocalDate?
+    ) {
+        this.period = period
+        this.startDate = startDate
+        updateTitle()
+        chart.setPeriod(period)
         chart.update(
-            claudeRows.toMonthlyValues(),
-            codexRows.toMonthlyValues()
+            claudeRows.toPeriodValues(startDate),
+            codexRows.toPeriodValues(startDate)
         )
     }
 
     private fun setMetric(metric: TokenUsageChartMetric) {
-        titleLabel.text = when (metric) {
-            TokenUsageChartMetric.Tokens -> "Monthly total tokens"
-            TokenUsageChartMetric.Price -> "Monthly estimated price"
-        }
         chart.setMetric(metric)
+        updateChips()
+        updateTitle()
     }
 
-    private fun List<TokenUsageRow>.toMonthlyValues(): Map<String, TokenUsageMonthlyValue> {
+    private fun updateTitle() {
+        titleLabel.text = when (chart.metric) {
+            TokenUsageChartMetric.Tokens -> "${period.displayTitle(startDate)} total tokens"
+            TokenUsageChartMetric.Price -> "${period.displayTitle(startDate)} estimated price"
+        }
+    }
+
+    private fun List<TokenUsageRow>.toPeriodValues(startDate: LocalDate?): Map<String, TokenUsagePeriodValue> {
         return filterNot { it.isTotal }
-            .associate { row -> row.month to TokenUsageMonthlyValue(tokens = row.totalTokens, priceUsd = row.priceUsd) }
+            .filter { row -> startDate == null || row.month.asLocalDateOrNull()?.let { !it.isBefore(startDate) } == true }
+            .associate { row -> row.month to TokenUsagePeriodValue(tokens = row.totalTokens, priceUsd = row.priceUsd) }
     }
 
-    private fun colorSwatch(color: Color): JPanel {
-        return JPanel().apply {
-            background = color
-            isOpaque = true
-            preferredSize = Dimension(12, 12)
-            maximumSize = Dimension(12, 12)
-            border = BorderFactory.createLineBorder(JBColor(0xFFFFFF, 0x111827))
+    private fun updateChips() {
+        scopeChip.text = "Scope: ${if (repositoryScopeToggle.isSelected) "Repository" else "Global"}"
+        periodChip.text = "Group: ${if (dailyPeriodToggle.isSelected) "Daily" else "Monthly"}"
+        metricChip.text = "Metric: ${if (priceToggle.isSelected) "Price" else "Tokens"}"
+        providersChip.text = "Providers: ${providerSummary()}"
+    }
+
+    private fun providerSummary(): String {
+        return when {
+            claudeToggle.isSelected && codexToggle.isSelected -> "Claude + Codex"
+            claudeToggle.isSelected -> "Claude"
+            codexToggle.isSelected -> "Codex"
+            else -> "None"
+        }
+    }
+
+    private fun showScopeMenu() {
+        val menu = JPopupMenu()
+        menu.addFilterMenuItem("Global", globalScopeToggle.isSelected, enabled = true) {
+            if (!globalScopeToggle.isSelected) globalScopeToggle.doClick()
+            updateChips()
+        }
+        menu.addFilterMenuItem("Repository", repositoryScopeToggle.isSelected, repositoryScopeToggle.isEnabled) {
+            if (!repositoryScopeToggle.isSelected) repositoryScopeToggle.doClick()
+            updateChips()
+        }
+        menu.show(scopeChip, 0, scopeChip.height)
+    }
+
+    private fun showPeriodMenu() {
+        val menu = JPopupMenu()
+        menu.addFilterMenuItem("Monthly", monthlyPeriodToggle.isSelected, enabled = true) {
+            if (!monthlyPeriodToggle.isSelected) monthlyPeriodToggle.doClick()
+            updateChips()
+        }
+        menu.addFilterMenuItem("Daily", dailyPeriodToggle.isSelected, enabled = true) {
+            if (!dailyPeriodToggle.isSelected) dailyPeriodToggle.doClick()
+            updateChips()
+        }
+        menu.show(periodChip, 0, periodChip.height)
+    }
+
+    private fun showMetricMenu() {
+        val menu = JPopupMenu()
+        menu.addFilterMenuItem("Tokens", tokensToggle.isSelected, enabled = true) {
+            if (!tokensToggle.isSelected) tokensToggle.doClick()
+            updateChips()
+        }
+        menu.addFilterMenuItem("Price", priceToggle.isSelected, enabled = true) {
+            if (!priceToggle.isSelected) priceToggle.doClick()
+            updateChips()
+        }
+        menu.show(metricChip, 0, metricChip.height)
+    }
+
+    private fun showProvidersMenu() {
+        val menu = JPopupMenu()
+        menu.addFilterMenuItem("Claude", claudeToggle.isSelected, enabled = true) {
+            claudeToggle.isSelected = !claudeToggle.isSelected
+            chart.setSeriesVisibility(showClaude = claudeToggle.isSelected, showCodex = codexToggle.isSelected)
+            updateChips()
+        }
+        menu.addFilterMenuItem("Codex", codexToggle.isSelected, enabled = true) {
+            codexToggle.isSelected = !codexToggle.isSelected
+            chart.setSeriesVisibility(showClaude = claudeToggle.isSelected, showCodex = codexToggle.isSelected)
+            updateChips()
+        }
+        menu.show(providersChip, 0, providersChip.height)
+    }
+
+    private fun JPopupMenu.addFilterMenuItem(
+        title: String,
+        selected: Boolean,
+        enabled: Boolean,
+        action: () -> Unit
+    ) {
+        val item = JMenuItem(title).apply {
+            isEnabled = enabled
+            applyFilterMenuItemStyle(selected)
+            icon = FilterMenuSelectionIcon(selected)
+            disabledIcon = FilterMenuSelectionIcon(selected)
+            addActionListener { action() }
+        }
+        add(item)
+    }
+
+    private fun JMenuItem.applyFilterMenuItemStyle(selected: Boolean) {
+        isOpaque = true
+        iconTextGap = 6
+        border = BorderFactory.createEmptyBorder(6, 8, 6, 12)
+        background = if (selected) {
+            JBColor(0x2563EB, 0x1D4ED8)
+        } else {
+            JBColor(0xFFFFFF, 0x111827)
+        }
+        foreground = when {
+            !isEnabled -> JBColor(0x94A3B8, 0x64748B)
+            selected -> JBColor(0xFFFFFF, 0xFFFFFF)
+            else -> JBColor(0x334155, 0xCBD5E1)
+        }
+    }
+}
+
+private class FilterMenuSelectionIcon(private val selected: Boolean) : Icon {
+    override fun getIconWidth(): Int = 14
+
+    override fun getIconHeight(): Int = 16
+
+    override fun paintIcon(component: Component, graphics: Graphics, x: Int, y: Int) {
+        if (!selected) return
+        val g = graphics.create() as Graphics2D
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+            g.color = component.foreground
+            g.drawLine(x + 2, y + 8, x + 5, y + 11)
+            g.drawLine(x + 5, y + 11, x + 12, y + 4)
+        } finally {
+            g.dispose()
         }
     }
 }
@@ -288,11 +557,13 @@ private class TokenUsageChart : JPanel() {
         maximumFractionDigits = 2
         minimumFractionDigits = 2
     }
-    private var claudeByMonth: Map<String, TokenUsageMonthlyValue> = emptyMap()
-    private var codexByMonth: Map<String, TokenUsageMonthlyValue> = emptyMap()
+    private var claudeByMonth: Map<String, TokenUsagePeriodValue> = emptyMap()
+    private var codexByMonth: Map<String, TokenUsagePeriodValue> = emptyMap()
     private var showClaude = true
     private var showCodex = true
-    private var metric = TokenUsageChartMetric.Tokens
+    var metric = TokenUsageChartMetric.Tokens
+        private set
+    private var period = TokenUsagePeriod.Monthly
     private var barHitboxes: List<TokenUsageBarHitbox> = emptyList()
 
     init {
@@ -304,8 +575,8 @@ private class TokenUsageChart : JPanel() {
     }
 
     fun update(
-        claudeByMonth: Map<String, TokenUsageMonthlyValue>,
-        codexByMonth: Map<String, TokenUsageMonthlyValue>
+        claudeByMonth: Map<String, TokenUsagePeriodValue>,
+        codexByMonth: Map<String, TokenUsagePeriodValue>
     ) {
         this.claudeByMonth = claudeByMonth
         this.codexByMonth = codexByMonth
@@ -320,6 +591,11 @@ private class TokenUsageChart : JPanel() {
 
     fun setMetric(metric: TokenUsageChartMetric) {
         this.metric = metric
+        repaint()
+    }
+
+    fun setPeriod(period: TokenUsagePeriod) {
+        this.period = period
         repaint()
     }
 
@@ -347,7 +623,7 @@ private class TokenUsageChart : JPanel() {
         val months = (claudeByMonth.keys + codexByMonth.keys).sorted()
         if (months.isEmpty() || (!showClaude && !showCodex)) {
             barHitboxes = emptyList()
-            paintEmptyState(g, if (months.isEmpty()) "No monthly usage data" else "Select a provider to show the chart")
+            paintEmptyState(g, if (months.isEmpty()) "No ${period.title.lowercase(Locale.US)} usage data" else "Select a provider to show the chart")
             return
         }
 
@@ -400,11 +676,11 @@ private class TokenUsageChart : JPanel() {
         }
         if (visibleSeries.isEmpty()) return emptyList()
 
-        val groupWidth = ((right - left) / months.size.toDouble()).coerceAtLeast(18.0)
+        val groupWidth = ((right - left) / months.size.toDouble()).coerceAtLeast(1.0)
         val totalBarWidth = (groupWidth * 0.68).coerceAtMost(54.0)
-        val barGap = if (visibleSeries.size > 1) 4.0 else 0.0
+        val barGap = if (visibleSeries.size > 1 && groupWidth >= 10.0) 4.0 else 0.0
         val barWidth = ((totalBarWidth - barGap * (visibleSeries.size - 1)) / visibleSeries.size)
-            .coerceAtLeast(4.0)
+            .coerceAtLeast(if (groupWidth < 6.0) 1.0 else 3.0)
         val hitboxes = mutableListOf<TokenUsageBarHitbox>()
 
         months.forEachIndexed { monthIndex, month ->
@@ -434,7 +710,7 @@ private class TokenUsageChart : JPanel() {
         g.font = g.font.deriveFont(11f)
         g.color = JBColor(0x6B7280, 0x9CA3AF)
         val step = (months.size / 6).coerceAtLeast(1)
-        val groupWidth = ((right - left) / months.size.toDouble()).coerceAtLeast(18.0)
+        val groupWidth = ((right - left) / months.size.toDouble()).coerceAtLeast(1.0)
         months.forEachIndexed { index, month ->
             if (index % step != 0 && index != months.lastIndex) return@forEachIndexed
             val x = (left + groupWidth * (index + 0.5)).toInt()
@@ -451,7 +727,7 @@ private class TokenUsageChart : JPanel() {
         g.drawString(message, (this.width - width) / 2, this.height / 2)
     }
 
-    private fun TokenUsageMonthlyValue?.metricValue(): Double {
+    private fun TokenUsagePeriodValue?.metricValue(): Double {
         val value = this ?: return 0.0
         return when (metric) {
             TokenUsageChartMetric.Tokens -> value.tokens.toDouble()
@@ -488,14 +764,83 @@ private enum class TokenUsageChartMetric {
     Price
 }
 
-private data class TokenUsageMonthlyValue(
+private fun TokenUsagePeriod.displayTitle(startDate: LocalDate?): String {
+    return if (this == TokenUsagePeriod.Daily && startDate != null) {
+        "Daily last 3 months"
+    } else {
+        title
+    }
+}
+
+private fun String.asLocalDateOrNull(): LocalDate? {
+    return runCatching { LocalDate.parse(this) }.getOrNull()
+}
+
+private class FilterChipButton : JButton() {
+    init {
+        setFocusPainted(false)
+        isOpaque = false
+        isContentAreaFilled = false
+        isBorderPainted = false
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        icon = ChevronDownIcon()
+        horizontalTextPosition = SwingConstants.LEFT
+        iconTextGap = 7
+        margin = Insets(5, 12, 5, 12)
+        border = BorderFactory.createEmptyBorder(5, 12, 5, 12)
+        foreground = JBColor(0x334155, 0xCBD5E1)
+        font = font.deriveFont(12f)
+    }
+
+    override fun paintComponent(graphics: Graphics) {
+        val g = graphics.create() as Graphics2D
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            val selectedBorder = model.isPressed || model.isRollover
+            g.color = JBColor(0xFFFFFF, 0x111827)
+            g.fillRoundRect(1, 1, width - 2, height - 2, 10, 10)
+            g.color = if (selectedBorder) {
+                JBColor(0x2563EB, 0x60A5FA)
+            } else {
+                JBColor(0xCBD5E1, 0x475569)
+            }
+            g.stroke = BasicStroke(if (selectedBorder) 1.5f else 1f)
+            g.drawRoundRect(1, 1, width - 3, height - 3, 10, 10)
+        } finally {
+            g.dispose()
+        }
+        super.paintComponent(graphics)
+    }
+}
+
+private class ChevronDownIcon : Icon {
+    override fun getIconWidth(): Int = 9
+
+    override fun getIconHeight(): Int = 6
+
+    override fun paintIcon(component: Component, graphics: Graphics, x: Int, y: Int) {
+        val g = graphics.create() as Graphics2D
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g.color = JBColor(0x64748B, 0x94A3B8)
+            g.stroke = BasicStroke(1.7f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+            val middleY = y + 2
+            g.drawLine(x + 1, middleY, x + 4, middleY + 3)
+            g.drawLine(x + 4, middleY + 3, x + 8, middleY)
+        } finally {
+            g.dispose()
+        }
+    }
+}
+
+private data class TokenUsagePeriodValue(
     val tokens: Long,
     val priceUsd: Double
 )
 
 private data class TokenUsageSeries(
     val provider: String,
-    val values: Map<String, TokenUsageMonthlyValue>,
+    val values: Map<String, TokenUsagePeriodValue>,
     val color: Color
 )
 
