@@ -1,46 +1,40 @@
 # Git Heatmap
 
-Git Heatmap is an IntelliJ IDEA plugin prototype that analyzes Git history and visualizes repository activity as a heatmap. It also shows file, commit, author, and effort-level analytics inside a dedicated tool window.
+Git Heatmap is an IntelliJ IDEA plugin that analyzes Git history inside the IDE. It visualizes file activity as a heatmap and provides file, commit, author, code statistics, token usage, and estimated effort analytics.
 
-## What It Does
+## Features
 
-- Reads Git history from the selected repository
-- Calculates per-file activity and heat scores
-- Displays a file heatmap
-- Shows file-level analytics with sortable columns
-- Shows commit-level analytics with estimated effort
-- Shows author-level analytics with added, deleted, net, and effort totals
-- Supports date-range filtering
-- Supports PR-style branch comparison with overlay highlighting
-- Supports multiple Git repositories under the same project root
-- Supports an aggregate `All repositories` scope for workspace-wide analysis
+- Automatically loads Git history for the selected repository and branch.
+- Calculates per-file heat scores.
+- Visualizes repository activity as a heatmap.
+- Provides sortable Files, Commits, and Authors tables.
+- Shows Added, Deleted, and Net line-change metrics.
+- Estimates engineering effort with a heuristic model.
+- Filters Files and Heatmap by selected author or commit.
+- Supports optional date-range filtering.
+- Supports PR Overlay by comparing two branches.
+- Discovers multiple Git repositories under the same project root.
+- Supports an aggregate `All repositories` workspace view.
+- Shows Code Statistics with file format distribution, contribution calendar, and hourly commit analysis.
+- Shows Token Usage for Claude and Codex with token and estimated price views.
 
 ## Requirements
 
 - `JDK 21`
 - `Git`
-- `IntelliJ IDEA 2024.2+`
-- A Gradle-capable environment on macOS, Linux, or Windows
+- `IntelliJ IDEA 2025.3+`
+- A Gradle-capable macOS, Linux, or Windows environment
 
-## Build Target
+## Technical Details
 
-- Build target: `2024.2`
-- Since build: `242`
-- Compatibility goal: `2024.2+`
+- Kotlin JVM
+- IntelliJ Platform Plugin
 - Plugin ID: `com.githeatmap`
+- Plugin version: `1.2.0`
+- Build target: `IntelliJ IDEA 2026.1`
+- Compatibility: `2025.3+`
+- Since build: `253`
 - Tool window: `Git Heatmap`
-
-## Verified IDE Matrix
-
-Plugin verification is configured for:
-
-- `IntelliJ IDEA Community 2024.2`
-- `IntelliJ IDEA 2024.2`
-- `IntelliJ IDEA Community 2024.3`
-- `IntelliJ IDEA 2024.3`
-- `IntelliJ IDEA Community 2025.1`
-- `IntelliJ IDEA 2025.1`
-- `IntelliJ IDEA 2026.1`
 
 ## Setup
 
@@ -54,16 +48,17 @@ Check Java:
 
 ```bash
 java -version
+./gradlew -version
 ```
 
-If needed, point Gradle to JDK 21. Example on macOS:
+If needed, point Gradle to JDK 21 on macOS:
 
 ```bash
 export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
-## Development Commands
+## Run
 
 Run the plugin in a sandbox IDE:
 
@@ -71,13 +66,21 @@ Run the plugin in a sandbox IDE:
 ./gradlew runIde
 ```
 
-Compile the project:
+To run from IntelliJ IDEA:
+
+1. Open this project in IntelliJ IDEA.
+2. Select `JDK 21` as the Gradle JVM.
+3. Run the `runIde` Gradle task.
+
+## Build and Test
+
+Compile Kotlin:
 
 ```bash
 ./gradlew compileKotlin
 ```
 
-Run tests and coverage gates:
+Run tests and quality checks:
 
 ```bash
 ./gradlew check
@@ -86,39 +89,45 @@ Run tests and coverage gates:
 Build the plugin distribution:
 
 ```bash
+./gradlew buildPlugin
+```
+
+Run a full build:
+
+```bash
 ./gradlew build
 ```
 
-## How to Use
+## Usage
 
-Open an IntelliJ project, then open the `Git Heatmap` tool window.
+Open an IntelliJ project that contains one or more Git repositories, then open the `Git Heatmap` tool window. The plugin discovers repositories and automatically starts loading Git history for the selected repository and branch. The `Load` button remains available for manual reloads.
 
-### Top controls
+### Top Controls
 
-- `Repository`: choose the active Git root
-- `Branch`: choose which branch history will be loaded
-- `Load`: read Git history and compute metrics
-- `PR Overlay`: compare two branches inside the selected repository
-- `Clear Overlay`: remove the active PR scope
-- `Clear Author Filter`: clear the active author filter
-- `Clear Commit Filter`: clear the active commit filter
-- `Date range`: optional start and end dates
+- `Repository`: Choose a single repository or `All repositories`.
+- `Branch`: Choose the branch history to analyze in single-repository mode.
+- `Load`: Reload Git history for the selected scope.
+- `PR Overlay`: Compare two branches in the selected repository.
+- `Clear Overlay`: Remove the active PR overlay.
+- `Clear Author Filter`: Remove the active author filter.
+- `Clear Commit Filter`: Remove the active commit filter.
+- `Date range`: Optional start and end date filter.
 
-If neither start nor end is selected, the plugin analyzes all available history for the loaded branch.
+If no date range is selected, the plugin uses all loaded history. If only one side of the range is selected, the filter is open-ended.
 
 ## Tabs
 
 ### Heatmap
 
-- Each cell represents a file
-- Hotter files are more active according to the calculated heat score
-- Hover shows tooltip details
-- Clicking a cell selects the same file in the `Files` tab
-- Double-click behavior resolves and opens the underlying file
+- Each cell represents a file.
+- Hotter colors indicate higher change activity.
+- Hover shows file details.
+- Clicking a cell selects the same file in the `Files` tab.
+- Active author or commit filters also scope the heatmap.
 
 ### Files
 
-Columns:
+Main columns:
 
 - `File`
 - `Heat`
@@ -128,16 +137,11 @@ Columns:
 - `Net`
 - `Authors`
 
-Behavior:
-
-- Numeric columns are sortable
-- When a PR overlay is active, the list is limited to overlay files
-- When an author is selected, the list is limited to that author's files
-- When a commit is selected, the list is limited to that commit's files
+Numeric columns sort numerically. When PR overlay, author filter, or commit filter is active, the file list is scoped accordingly.
 
 ### Commits
 
-Columns:
+Main columns:
 
 - `Hash`
 - `Repo` in aggregate mode
@@ -149,15 +153,11 @@ Columns:
 - `Effort`
 - `Message`
 
-Behavior:
-
-- Double-clicking a commit activates a commit filter
-- The `Files` and `Heatmap` tabs switch to that commit's files
-- The message column shows the full commit message in a tooltip
+The message column is wide and shows the full commit message in a tooltip. Double-clicking a commit filters Files and Heatmap to that commit's changed files.
 
 ### Authors
 
-Columns:
+Main columns:
 
 - `#`
 - `Author`
@@ -169,108 +169,80 @@ Columns:
 - `Effort Min`
 - `Effort Max`
 
-Behavior:
+Double-clicking an author filters Files, Commits, Heatmap, and summary to that author. `Clear Author Filter` removes the filter.
 
-- Columns are sortable
-- Double-clicking an author activates an author filter
-- The `Files`, `Commits`, `Heatmap`, and summary views switch to that author's scope
+### Code Statistics
 
-## Summary and Filters
+- Shows file format and language-style distribution.
+- Provides a GitHub-like contribution calendar.
+- Contribution calendar can show `Commits` or `Effort`.
+- Shows average hourly commit activity for the last 30 days.
+- Respects the active author filter when present.
 
-The summary line updates according to the active scope:
+### Token Usage
 
-- full loaded history
-- selected author
-- selected commit
-- PR overlay scope
+Reads local usage files for Claude and Codex.
 
-The right-side labels indicate active filters for:
+- `Scope`: `Global` or current `Repository`.
+- `Group`: `Monthly` or `Daily`.
+- `Metric`: `Tokens` or `Price`.
+- `Providers`: Claude and Codex visibility.
+- Monthly view shows all monthly history.
+- Daily chart shows the last 3 months.
+- Daily tables list all daily history.
+- Claude and Codex are shown as separate tables.
+- Tables include input, cache write, cache read, output, total, and price fields.
 
-- PR overlay
-- author
-- commit
+Token Usage loads in a background thread so the UI does not freeze. Price values are estimates based on known model pricing.
 
 ## PR Overlay
 
 `PR Overlay` compares:
 
-- `base branch`
-- `target branch`
+- `Base branch`
+- `Target branch`
 
-The plugin uses:
+When overlay is active:
 
-- branch diff for changed files
-- commit range for PR-scoped commit and author analytics
+- Files shows only diff files.
+- Commits shows only commits in the branch range.
+- Authors are calculated from the same range.
+- Summary reflects the PR scope.
 
-When PR overlay is active:
+PR Overlay is disabled in `All repositories` mode.
 
-- `Files` shows only changed files
-- `Commits` shows only commits in the compared range
-- `Authors` shows only authors in the compared range
-- the summary reflects the PR scope
+## Multi-Repository Mode
 
-`Clear Overlay` returns the tool window to the current branch/date-range analysis.
+The plugin can discover Git repositories under the project root even when the project root itself is not a Git repository.
 
-### Aggregate mode limitation
-
-`PR Overlay` is available only in single-repository mode.
-
-When `Repository = All repositories`:
-
-- overlay is disabled
-- branch history is loaded from each discovered repository
-- results are merged into one aggregate view
-
-## Multi-Repository Support
-
-If the project root itself is not a Git repository but contains multiple Git repositories, the plugin can discover them.
-
-Modes:
-
-- `Single repository`
-- `All repositories`
-
-In aggregate mode:
-
-- commits from all discovered repositories are merged
-- file paths are prefixed so duplicate relative paths remain distinguishable
-- the `Commits` tab shows a `Repo` column
+- Single-repository mode enables branch selection.
+- `All repositories` merges commits into an aggregate workspace view.
+- Aggregate file paths are prefixed by repository to avoid ambiguity.
+- The Commits tab shows a `Repo` column in aggregate mode.
+- PR Overlay is not available in aggregate mode.
 
 ## Estimated Effort
 
-The plugin includes a heuristic effort model for a mid-to-senior developer baseline.
+Effort is heuristic and represents an estimated range for a 5-year mid-senior developer baseline. It is not actual tracked time.
 
-It is used in:
+Effort is used in:
 
-- commit rows
-- author totals
-- summary line
-- PR overlay summary
-
-This is an estimated engineering effort range, not tracked or actual time.
-
-## Expected Workflow
-
-1. Select a repository or `All repositories`
-2. Select a branch if you are in single-repository mode
-3. Click `Load`
-4. Review the heatmap, files, commits, and author analytics
-5. Optionally set a date range
-6. Optionally activate `PR Overlay`
-7. Optionally drill down by author or commit
+- Commit rows
+- Author totals
+- Summary
+- PR overlay scope
 
 ## Known Limitations
 
-- PR overlay is disabled in aggregate mode
-- Effort values are heuristic estimates, not real recorded time
-- Very large repositories may still need additional performance tuning
-- Some IntelliJ UI APIs currently emit deprecation warnings during compilation
+- PR Overlay works only in single-repository mode.
+- Effort values are estimates, not actual time.
+- Very large Git histories can take time during the first load.
+- Token Usage filter changes run in the background, but raw event caching would be needed for true recomputation speedups.
+- Token prices are calculated from known model pricing; fallback pricing may be used for newer unknown models.
 
 ## Troubleshooting
 
 ### Build fails because of Java version
-
-Check:
 
 ```bash
 java -version
@@ -279,22 +251,22 @@ java -version
 
 Make sure Gradle runs with `JDK 21`.
 
+### Tool window does not appear
+
+- Start the sandbox IDE with `./gradlew runIde`.
+- Confirm the plugin is installed in the sandbox IDE.
+- Look for the `Git Heatmap` tool window.
+
 ### No data is shown
 
-- Confirm the selected project contains one or more Git repositories
-- Confirm the selected branch exists
-- Click `Load` again after changing repository or branch
+- Confirm the project contains at least one Git repository.
+- Confirm the selected branch exists and is accessible.
+- Try manual reload with `Load`.
 
 ### PR Overlay returns nothing
 
-- Verify both branch names exist in the selected repository
-- Make sure you are not in `All repositories` mode
-
-### The tool window does not appear
-
-- Run the plugin in the sandbox IDE with `runIde`
-- Reopen the project in the sandbox IDE
-- Look for the `Git Heatmap` tool window
+- Check both base and target branch names.
+- Make sure you are not in `All repositories` mode.
 
 ## Useful Commands
 
@@ -302,5 +274,6 @@ Make sure Gradle runs with `JDK 21`.
 ./gradlew runIde
 ./gradlew compileKotlin
 ./gradlew check
+./gradlew buildPlugin
 ./gradlew build
 ```
