@@ -30,7 +30,7 @@ internal object TokenUsageSupport {
                 val json = jsonObject(line) ?: return@forEachLineSafely
                 currentWorkspacePath = json.stringMember("cwd")
                     ?: json.stringMember("project")
-                            ?: currentWorkspacePath
+                    ?: currentWorkspacePath
                 if (!line.contains(""""usage"""")) return@forEachLineSafely
                 val message = json.objectMember("message")
                 if (!isClaudeAssistantUsage(json, message)) return@forEachLineSafely
@@ -44,10 +44,10 @@ internal object TokenUsageSupport {
                 val cacheCreation5mTokens = cacheCreation?.longMember("ephemeral_5m_input_tokens") ?: 0
                 val cacheCreation1hTokens = cacheCreation?.longMember("ephemeral_1h_input_tokens") ?: 0
                 val cacheCreationUnclassifiedTokens = (
-                        cacheCreationTokens -
-                                cacheCreation5mTokens -
-                                cacheCreation1hTokens
-                        ).coerceAtLeast(0)
+                    cacheCreationTokens -
+                        cacheCreation5mTokens -
+                        cacheCreation1hTokens
+                    ).coerceAtLeast(0)
                 val inputTokens = usage.longMember("input_tokens")
                 val cacheReadTokens = usage.longMember("cache_read_input_tokens")
                 val outputTokens = usage.longMember("output_tokens")
@@ -101,7 +101,7 @@ internal object TokenUsageSupport {
                     currentWorkspacePath = payload.stringMember("cwd") ?: currentWorkspacePath
                     currentModel = payload.stringMember("model")
                         ?: payload.objectMember("collaboration_mode")?.stringMember("model")
-                                ?: currentModel
+                        ?: currentModel
                     return@forEachLineSafely
                 }
                 if (!line.contains(""""token_count"""") || !line.contains(""""last_token_usage"""")) {
@@ -163,7 +163,7 @@ internal object TokenUsageSupport {
 
     fun isClaudeAssistantUsageLine(line: String): Boolean {
         return stringValue(line, "type") == "assistant" ||
-                objectBlock(line, "message")?.let { block -> stringValue(block, "role") == "assistant" } == true
+            objectBlock(line, "message")?.let { block -> stringValue(block, "role") == "assistant" } == true
     }
 
     fun claudeUsageBlock(line: String): String? {
@@ -342,14 +342,14 @@ private class TokenUsageRepositoryFilter(repositoryRoot: File?) {
         val workspaceMatches = workspacePath?.let { workspacePath ->
             val workspace = File(workspacePath).normalizedAbsolutePath()
             workspace == root ||
-                    workspace.startsWith("$root/") ||
-                    root.startsWith("$workspace/")
+            workspace.startsWith("$root/") ||
+            root.startsWith("$workspace/")
         } ?: false
         if (workspaceMatches) return true
 
         val keys = claudeProjectKeys ?: return false
         return claudeProjectKey != null &&
-                (claudeProjectKey in keys || claudeProjectKey.isClaudeProjectVariantOfRoot())
+            (claudeProjectKey in keys || claudeProjectKey.isClaudeProjectVariantOfRoot())
     }
 
     private fun File.normalizedAbsolutePath(): String {

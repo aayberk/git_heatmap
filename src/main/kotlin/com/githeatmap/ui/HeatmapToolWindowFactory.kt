@@ -676,14 +676,14 @@ class HeatmapToolWindowContentBuilder {
                 selectedRange.startDate.isAfter(selectedRange.endDate)
             ) {
                 statusLabel.text = "Start date cannot be after end date"
-                JOptionPane.showMessageDialog(
-                    null,
-                    "Start date cannot be after end date.",
-                    "Date Range",
-                    JOptionPane.WARNING_MESSAGE
-                )
-                return
-            }
+                    JOptionPane.showMessageDialog(
+                        null,
+                        "Start date cannot be after end date.",
+                        "Date Range",
+                        JOptionPane.WARNING_MESSAGE
+                    )
+                    return
+                }
             val cacheKey = currentAnalysisKey(selectedRange)
             analysisCache[cacheKey]?.let { cachedResult ->
                 applyAnalysis(cachedResult)
@@ -724,31 +724,65 @@ class HeatmapToolWindowContentBuilder {
         }
 
         loadHistory = load@{
-            val roots = selectedRoots()
-            if (roots.isEmpty()) {
-                statusLabel.text = "No repository selected"
-                return@load
-            }
-            val historyBranch = currentHistoryBranch ?: DEFAULT_BRANCH_REF
-            loadGeneration += 1
-            val generation = loadGeneration
-            setBusy(true)
-            object : Task.Backgroundable(project, "Reading git history") {
-                override fun run(indicator: ProgressIndicator) {
-                    indicator.isIndeterminate = true
-                    if (isAggregateSelection()) {
-                        val commitsByRoot = linkedMapOf<GitRootDiscovery.DiscoveredGitRoot, List<CommitEvent>>()
-                        roots.forEach { root ->
-                            val aggregateBranch = DEFAULT_BRANCH_REF
-                            val cache = commitCacheFor(root.absolutePath, aggregateBranch)
+                val roots = selectedRoots()
+                if (roots.isEmpty()) {
+                    statusLabel.text = "No repository selected"
+                    return@load
+                }
+                val historyBranch = currentHistoryBranch ?: DEFAULT_BRANCH_REF
+                loadGeneration += 1
+                val generation = loadGeneration
+                setBusy(true)
+                object : Task.Backgroundable(project, "Reading git history") {
+                    override fun run(indicator: ProgressIndicator) {
+                        indicator.isIndeterminate = true
+                        if (isAggregateSelection()) {
+                            val commitsByRoot = linkedMapOf<GitRootDiscovery.DiscoveredGitRoot, List<CommitEvent>>()
+                            roots.forEach { root ->
+                                val aggregateBranch = DEFAULT_BRANCH_REF
+                                val cache = commitCacheFor(root.absolutePath, aggregateBranch)
+                                val branchCachedCommits = cache.load()
+                                val lastHash = branchCachedCommits.firstOrNull()?.hash
+                                val loadedCommits = if (lastHash != null && !shouldRefreshFullHistory(branchCachedCommits)) {
+                                    val newCommits = try {
+                                        gitReader.readCommitsSince(root.absolutePath, lastHash, aggregateBranch)
+                                    } catch (error: IllegalStateException) {
+                                        if (shouldReloadFromScratch(error)) {
+                                            gitReader.readCommits(root.absolutePath, branch = aggregateBranch)
+                                        } else {
+                                            throw error
+                                        }
+                                    }
+
+                                    if (newCommits.isNotEmpty()) {
+                                        mergeCommits(newCommits, branchCachedCommits)
+                                    } else {
+                                        branchCachedCommits
+                                    }
+                                } else {
+                                    gitReader.readCommits(root.absolutePath, branch = aggregateBranch)
+                                }
+                                cache.save(loadedCommits)
+                                commitsByRoot[root] = loadedCommits
+                            }
+
+                            updateDisplayedPathMappings(commitsByRoot)
+                            cachedCommits = commitsByRoot.entries
+                                .flatMap { (root, commits) -> withDisplayPaths(root, commits) }
+                                .sortedByDescending { it.timestamp }
+                            currentLoadedBranch = null
+                        } else {
+                            val repoRootPath = currentRepoPath() ?: return
+                            val cache = commitCacheFor(repoRootPath, historyBranch)
+                            val metricsCache = metricsCacheFor(repoRootPath, historyBranch)
                             val branchCachedCommits = cache.load()
                             val lastHash = branchCachedCommits.firstOrNull()?.hash
-                            val loadedCommits = if (lastHash != null && !shouldRefreshFullHistory(branchCachedCommits)) {
+                            cachedCommits = if (lastHash != null && !shouldRefreshFullHistory(branchCachedCommits)) {
                                 val newCommits = try {
-                                    gitReader.readCommitsSince(root.absolutePath, lastHash, aggregateBranch)
+                                    gitReader.readCommitsSince(repoRootPath, lastHash, historyBranch)
                                 } catch (error: IllegalStateException) {
                                     if (shouldReloadFromScratch(error)) {
-                                        gitReader.readCommits(root.absolutePath, branch = aggregateBranch)
+                                        gitReader.readCommits(repoRootPath, branch = historyBranch)
                                     } else {
                                         throw error
                                     }
@@ -760,70 +794,36 @@ class HeatmapToolWindowContentBuilder {
                                     branchCachedCommits
                                 }
                             } else {
-                                gitReader.readCommits(root.absolutePath, branch = aggregateBranch)
+                                gitReader.readCommits(repoRootPath, branch = historyBranch)
                             }
-                            cache.save(loadedCommits)
-                            commitsByRoot[root] = loadedCommits
+                            currentLoadedBranch = historyBranch
+                            cache.save(cachedCommits)
+                            metricsCache.clear()
+                            displayedPathToAbsolutePath = emptyMap()
+                            configurePathResolver()
                         }
-
-                        updateDisplayedPathMappings(commitsByRoot)
-                        cachedCommits = commitsByRoot.entries
-                            .flatMap { (root, commits) -> withDisplayPaths(root, commits) }
-                            .sortedByDescending { it.timestamp }
-                        currentLoadedBranch = null
-                    } else {
-                        val repoRootPath = currentRepoPath() ?: return
-                        val cache = commitCacheFor(repoRootPath, historyBranch)
-                        val metricsCache = metricsCacheFor(repoRootPath, historyBranch)
-                        val branchCachedCommits = cache.load()
-                        val lastHash = branchCachedCommits.firstOrNull()?.hash
-                        cachedCommits = if (lastHash != null && !shouldRefreshFullHistory(branchCachedCommits)) {
-                            val newCommits = try {
-                                gitReader.readCommitsSince(repoRootPath, lastHash, historyBranch)
-                            } catch (error: IllegalStateException) {
-                                if (shouldReloadFromScratch(error)) {
-                                    gitReader.readCommits(repoRootPath, branch = historyBranch)
-                                } else {
-                                    throw error
-                                }
-                            }
-
-                            if (newCommits.isNotEmpty()) {
-                                mergeCommits(newCommits, branchCachedCommits)
-                            } else {
-                                branchCachedCommits
-                            }
-                        } else {
-                            gitReader.readCommits(repoRootPath, branch = historyBranch)
-                        }
-                        currentLoadedBranch = historyBranch
-                        cache.save(cachedCommits)
-                        metricsCache.clear()
-                        displayedPathToAbsolutePath = emptyMap()
-                        configurePathResolver()
+                        analysisCache.clear()
                     }
-                    analysisCache.clear()
-                }
 
-                override fun onSuccess() {
-                    setBusy(false)
-                    if (generation != loadGeneration) return
-                    refresh()
-                }
+                    override fun onSuccess() {
+                        setBusy(false)
+                        if (generation != loadGeneration) return
+                        refresh()
+                    }
 
-                override fun onThrowable(error: Throwable) {
-                    setBusy(false)
-                    if (generation != loadGeneration) return
-                    statusLabel.text = "Git history load failed"
-                    summaryLabel.text = "Commits: 0 | Lines: 0 | Files: 0"
-                    JOptionPane.showMessageDialog(
-                        null,
-                        error.message ?: "Unable to read git history.",
-                        "Load Error",
-                        JOptionPane.ERROR_MESSAGE
-                    )
-                }
-            }.queue()
+                    override fun onThrowable(error: Throwable) {
+                        setBusy(false)
+                        if (generation != loadGeneration) return
+                        statusLabel.text = "Git history load failed"
+                        summaryLabel.text = "Commits: 0 | Lines: 0 | Files: 0"
+                        JOptionPane.showMessageDialog(
+                            null,
+                            error.message ?: "Unable to read git history.",
+                            "Load Error",
+                            JOptionPane.ERROR_MESSAGE
+                        )
+                    }
+                }.queue()
         }
 
         loadButton = JButton("Load").apply {
@@ -1094,8 +1094,8 @@ class HeatmapToolWindowContentBuilder {
     private fun shouldReloadFromScratch(error: IllegalStateException): Boolean {
         val message = error.message?.lowercase().orEmpty()
         return message.contains("unknown revision") ||
-                message.contains("bad revision") ||
-                message.contains("ambiguous argument")
+            message.contains("bad revision") ||
+            message.contains("ambiguous argument")
     }
 
     private fun shouldRefreshFullHistory(commits: List<CommitEvent>): Boolean {

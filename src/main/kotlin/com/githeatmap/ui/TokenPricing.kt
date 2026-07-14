@@ -76,9 +76,10 @@ private data class ClaudePricing(
         outputTokens: Long
     ): Double {
         return inputTokens.cost(inputPerMillion) +
-                (cacheCreation5mTokens + cacheCreation1hTokens).cost(cacheCreation5mPerMillion) +
-                cacheReadTokens.cost(cacheReadPerMillion) +
-                outputTokens.cost(outputPerMillion)
+            cacheCreation5mTokens.cost(cacheCreation5mPerMillion) +
+            cacheCreation1hTokens.cost(cacheCreation1hPerMillion) +
+            cacheReadTokens.cost(cacheReadPerMillion) +
+            outputTokens.cost(outputPerMillion)
     }
 
     companion object {
@@ -97,8 +98,9 @@ private data class ClaudePricing(
                 normalized.contains("opus-4-1") -> OPUS_4_LEGACY.exact()
                 normalized.contains("opus-4") -> OPUS_4_LEGACY.exact()
                 normalized.contains("opus") -> OPUS_45_PLUS.fallback()
+                normalized.contains("sonnet-5") -> SONNET_5.exact()
                 normalized.contains("sonnet-4") -> SONNET_4.exact()
-                normalized.contains("sonnet") -> SONNET_4.fallback()
+                normalized.contains("sonnet") -> SONNET_5.fallback()
                 normalized.contains("haiku-4-5") -> HAIKU_45.exact()
                 normalized.contains("haiku-3-5") -> HAIKU_35.exact()
                 normalized.contains("haiku") -> HAIKU_45.fallback()
@@ -137,6 +139,15 @@ private data class ClaudePricing(
             cacheReadPerMillion = 1.50,
             outputPerMillion = 75.0
         )
+        // Anthropic's introductory Sonnet 5 pricing is valid through 2026-08-31.
+        private val SONNET_5 = ClaudePricing(
+            inputPerMillion = 2.0,
+            cacheCreation5mPerMillion = 2.50,
+            cacheCreation1hPerMillion = 4.0,
+            cacheReadPerMillion = 0.20,
+            outputPerMillion = 10.0,
+            supportsDataResidencyMultiplier = true
+        )
         private val SONNET_4 = ClaudePricing(
             inputPerMillion = 3.0,
             cacheCreation5mPerMillion = 3.75,
@@ -170,8 +181,8 @@ private data class OpenAiPricing(
 ) {
     fun costUsd(inputTokens: Long, cachedInputTokens: Long, outputTokens: Long): Double {
         return inputTokens.cost(inputPerMillion) +
-                cachedInputTokens.cost(cachedInputPerMillion) +
-                outputTokens.cost(outputPerMillion)
+            cachedInputTokens.cost(cachedInputPerMillion) +
+            outputTokens.cost(outputPerMillion)
     }
 
     companion object {
@@ -179,6 +190,11 @@ private data class OpenAiPricing(
             val normalized = model?.lowercase().orEmpty()
             return when {
                 normalized.isBlank() -> CODEX_USAGE.fallback()
+                normalized.startsWith("gpt-5.6-luna") -> GPT_56_LUNA.exact()
+                normalized.startsWith("gpt-5.6-terra") -> GPT_56_TERRA.exact()
+                normalized.startsWith("gpt-5.6-sol") -> GPT_56_SOL.exact()
+                normalized == "gpt-5.6" -> GPT_56_SOL.exact()
+                normalized.startsWith("gpt-5.6") -> GPT_56_SOL.fallback()
                 normalized.startsWith("gpt-5.5") -> GPT_55.exact()
                 normalized.startsWith("gpt-5.4") -> GPT_54.exact()
                 normalized.startsWith("gpt-5.3") -> GPT_52.exact()
@@ -197,6 +213,21 @@ private data class OpenAiPricing(
             inputPerMillion = 1.25,
             cachedInputPerMillion = 0.125,
             outputPerMillion = 10.0
+        )
+        private val GPT_56_SOL = OpenAiPricing(
+            inputPerMillion = 5.0,
+            cachedInputPerMillion = 0.50,
+            outputPerMillion = 30.0
+        )
+        private val GPT_56_TERRA = OpenAiPricing(
+            inputPerMillion = 2.50,
+            cachedInputPerMillion = 0.25,
+            outputPerMillion = 15.0
+        )
+        private val GPT_56_LUNA = OpenAiPricing(
+            inputPerMillion = 1.0,
+            cachedInputPerMillion = 0.10,
+            outputPerMillion = 6.0
         )
         private val GPT_55 = OpenAiPricing(
             inputPerMillion = 5.0,

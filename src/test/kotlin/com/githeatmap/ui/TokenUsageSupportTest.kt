@@ -3,6 +3,7 @@ package com.githeatmap.ui
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
@@ -124,7 +125,7 @@ class TokenUsageSupportTest {
     }
 
     @Test
-    fun `new model names use latest known pricing fallback`() {
+    fun `unknown model variants use latest known pricing fallback`() {
         val codex = TokenPricing.openAiCostUsd(
             model = "gpt-5.6-codex",
             inputTokens = 1_000_000,
@@ -132,7 +133,7 @@ class TokenUsageSupportTest {
             outputTokens = 1_000_000
         )
         val claude = TokenPricing.claudeCostUsd(
-            model = "claude-sonnet-5-20260601",
+            model = "claude-sonnet-next",
             inputTokens = 1_000_000,
             cacheCreation5mTokens = 0,
             cacheCreation1hTokens = 0,
@@ -143,9 +144,40 @@ class TokenUsageSupportTest {
         )
 
         assertTrue(codex.usesFallbackPricing, "Codex fallback marker")
-        assertTrue(codex.usd > 0.0, "Codex fallback price")
+        assertEquals(35.0, codex.usd, 0.000001, "Codex fallback price")
         assertTrue(claude.usesFallbackPricing, "Claude fallback marker")
-        assertTrue(claude.usd > 0.0, "Claude fallback price")
+        assertEquals(12.0, claude.usd, 0.000001, "Claude fallback price")
+    }
+
+    @Test
+    fun `gpt 5 6 model family pricing is supported`() {
+        val sol = TokenPricing.openAiCostUsd("gpt-5.6", 1_000_000, 0, 1_000_000)
+        val terra = TokenPricing.openAiCostUsd("gpt-5.6-terra", 1_000_000, 0, 1_000_000)
+        val luna = TokenPricing.openAiCostUsd("gpt-5.6-luna", 1_000_000, 0, 1_000_000)
+
+        assertEquals(35.0, sol.usd, 0.000001, "GPT-5.6 Sol cost")
+        assertEquals(17.5, terra.usd, 0.000001, "GPT-5.6 Terra cost")
+        assertEquals(7.0, luna.usd, 0.000001, "GPT-5.6 Luna cost")
+        assertFalse(sol.usesFallbackPricing, "GPT-5.6 Sol exact match")
+        assertFalse(terra.usesFallbackPricing, "GPT-5.6 Terra exact match")
+        assertFalse(luna.usesFallbackPricing, "GPT-5.6 Luna exact match")
+    }
+
+    @Test
+    fun `claude sonnet 5 introductory pricing is supported`() {
+        val sonnet = TokenPricing.claudeCostUsd(
+            model = "claude-sonnet-5-20260601",
+            inputTokens = 1_000_000,
+            cacheCreation5mTokens = 1_000_000,
+            cacheCreation1hTokens = 1_000_000,
+            cacheCreationUnclassifiedTokens = 0,
+            cacheReadTokens = 1_000_000,
+            outputTokens = 1_000_000,
+            inferenceGeo = null
+        )
+
+        assertEquals(18.7, sonnet.usd, 0.000001, "Sonnet 5 cost")
+        assertFalse(sonnet.usesFallbackPricing, "Sonnet 5 exact match")
     }
 
     @Test
@@ -173,6 +205,8 @@ class TokenUsageSupportTest {
 
         assertEquals(73.5, fable.usd, 0.000001, "Fable 5 cost")
         assertEquals(73.5, mythos.usd, 0.000001, "Mythos 5 cost")
+        assertFalse(fable.usesFallbackPricing, "Fable 5 exact match")
+        assertFalse(mythos.usesFallbackPricing, "Mythos 5 exact match")
     }
 
     @Test

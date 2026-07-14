@@ -2,7 +2,43 @@
     <id>com.githeatmap</id>
     <name>Git Heatmap</name>
     <vendor>Git Heatmap</vendor>
-    <description>Git repository analytics and visualization</description>
+    <description><![CDATA[
+        <p>
+            Git Heatmap analyzes Git history inside IntelliJ IDEA and visualizes repository activity as a file heatmap.
+            It helps developers identify hotspot files, inspect commit and author activity, estimate engineering effort,
+            compare branches, review code statistics, and track local Claude/Codex token usage without leaving the IDE.
+        </p>
+        <p><b>Main features</b></p>
+        <ul>
+            <li>Automatic Git history loading for the selected repository and branch.</li>
+            <li>File heatmap with per-file heat scores and interactive drill-down.</li>
+            <li>Sortable Files, Commits, and Authors views with added, deleted, net, effort, and message details.</li>
+            <li>Author and commit filters that scope Files, Commits, Heatmap, and summary together.</li>
+            <li>Optional date range filtering and PR Overlay branch comparison.</li>
+            <li>Multi-repository discovery with aggregate <code>All repositories</code> analysis.</li>
+            <li>Code Statistics with file format distribution, contribution calendar and trends, plus hourly commit/effort analysis.</li>
+            <li>Token Usage reads local Claude and Codex usage files without API keys or external uploads.</li>
+            <li>Global/repository scope, monthly/daily grouping, token/price views, model-aware estimates, fallback notices, and background loading.</li>
+        </ul>
+        <p>
+            Effort values are heuristic estimates for relative engineering effort visibility; they are not actual tracked time.
+        </p>
+    ]]></description>
+    <change-notes><![CDATA[
+        <p><b>Git Heatmap 1.2.x updates</b></p>
+        <ul>
+            <li>Added exact pricing for GPT-5.6 Sol, Terra, and Luna.</li>
+            <li>Added Claude Sonnet 5 pricing alongside Fable 5 and Mythos 5 support.</li>
+            <li>Corrected Claude one-hour prompt-cache write calculations to use the proper pricing tier.</li>
+            <li>Added clear notices when an unknown model variant uses the latest known fallback price.</li>
+            <li>Added Token Usage filters for global/repository scope and monthly/daily grouping.</li>
+            <li>Added token and estimated price views for Claude and Codex usage.</li>
+            <li>Redesigned the Token Usage filter area with compact dropdown chips and improved light/dark theme contrast.</li>
+            <li>Moved Token Usage loading to the background so filter changes no longer block the UI.</li>
+            <li>Added automatic Git history loading when the tool window opens; the Load button remains available for manual reloads.</li>
+            <li>Updated README and Marketplace listing documentation to cover Code Statistics, Token Usage, multi-repository mode, and current workflows.</li>
+        </ul>
+    ]]></change-notes>
     <depends>com.intellij.modules.platform</depends>
     <depends>Git4Idea</depends>
     <extensions defaultExtensionNs="com.intellij">
